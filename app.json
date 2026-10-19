@@ -46,6 +46,13 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-image"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "88b147e3-b7cd-4dc4-afbd-82f0a49b6ba8"
+      }
+    },
+    "owner": "jamaica17"
   }
 }
