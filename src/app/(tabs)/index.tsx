@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Card, confirm, DateStepper, Empty, LedgerLine, Money, Screen, Section, T, Tag } from '../../components/ui';
 import { Icon, type IconName } from '../../components/icons';
-import { PaalalaCard } from '../../components/Isay';
+import { PaalalaCard } from '../../components/Mascot';
 import { greeting } from '../../lib/tips';
 import { dayActivity, daySummary, deleteEntry, getSetting, upcomingDues, type Activity } from '../../lib/db';
 import { useQuery } from '../../lib/useQuery';

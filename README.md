@@ -7,7 +7,7 @@ account and no internet: everything is stored in a SQLite file on the device.
 
 | Tab | What she uses it for |
 |---|---|
-| **Today** | Tagalog greeting and Isay's *paalala ngayong araw* (a new tip each day, plus reminders from her own records). Today's capital (puhunan), cash that should be in the box, sales, kilos sold, sales on credit. Quick buttons for **Sell fish**, **Buy stock**, **Got payment**, **Expense**, **Spoiled**. **Close the day**: count the cash and see if anything is missing. |
+| **Today** | Tagalog greeting and Mingming the Siamese cat's *paalala ngayong araw* (a new tip each day, plus reminders from her own records). Today's capital (puhunan), cash that should be in the box, sales, kilos sold, sales on credit. Quick buttons for **Sell fish**, **Buy stock**, **Got payment**, **Expense**, **Spoiled**. **Close the day**: count the cash and see if anything is missing. |
 | **Fish** | Daily fish audit: kilos bought, sold, spoiled and left per fish. Price list with buy cost, selling price and gain per kilo. |
 | **Utang** | Customers who owe her, and suppliers she owes. Each person shows their balance, utang since, the date they started paying, last payment, and the full history (fish, kilos × price = total, payments) with a running balance. Send a statement by Messenger/SMS, or call. |
 | **Expenses** | Daily / weekly / monthly totals by category (ice, transport, bags, rent…). |

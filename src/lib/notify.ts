@@ -3,7 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { addDays, parse, today } from './dates';
 import { peso } from './format';
 import { getSetting, setDueNotifyIds, unpaidDues, type LoanDue } from './db';
-import { tipOfTheDay } from './tips';
+import { MASCOT_NAME, tipOfTheDay } from './tips';
 
 // Everything is a local notification planned on the phone:
 // - loans: 8 AM the day before a due date and 8 AM on the day itself
@@ -93,7 +93,7 @@ export async function syncReminders() {
       when.setHours(6, 0, 0, 0);
       if (when.getTime() <= Date.now()) continue;
       await Notifications.scheduleNotificationAsync({
-        content: { title: 'Paalala ni Isay', body: tipOfTheDay(date) },
+        content: { title: `Paalala ni ${MASCOT_NAME}`, body: tipOfTheDay(date) },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when, channelId: CHANNEL },
       });
     }

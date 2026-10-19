@@ -2,6 +2,9 @@ import { addDays, daysBetween, relativeDay, today } from './dates';
 import { peso } from './format';
 import { daySummary, getDay, listPeople, upcomingDues } from './db';
 
+/** The Siamese cat who delivers the paalala. */
+export const MASCOT_NAME = 'Mingming';
+
 // Daily paalala in Tagalog. One saying per day (the same all day, a new one
 // tomorrow), plus reminders built from her own records.
 

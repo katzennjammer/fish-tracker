@@ -10,6 +10,7 @@ import { getPin, setPin } from '../lib/pin';
 import { syncReminders } from '../lib/notify';
 import { useQuery } from '../lib/useQuery';
 import { today } from '../lib/dates';
+import { MASCOT_NAME } from '../lib/tips';
 import { color, space } from '../lib/theme';
 
 export default function SettingsScreen() {
@@ -103,7 +104,7 @@ export default function SettingsScreen() {
         <Card style={styles.switchRow}>
           <View style={{ flex: 1 }}>
             <T v="strong">Morning reminder</T>
-            <T v="caption">Isay sends the day’s Tagalog paalala at 6 AM.</T>
+            <T v="caption">{MASCOT_NAME} sends the day’s Tagalog paalala at 6 AM.</T>
           </View>
           <Switch
             value={morning}

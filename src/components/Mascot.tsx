@@ -1,37 +1,58 @@
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import Svg, { Circle, Ellipse, G, Path } from 'react-native-svg';
+import { Image } from 'expo-image';
 import { T } from './ui';
-import { nudges, tipOfTheDay, type Nudge } from '../lib/tips';
+import { MASCOT_NAME, nudges, tipOfTheDay, type Nudge } from '../lib/tips';
 import { useQuery } from '../lib/useQuery';
 import { color, font } from '../lib/theme';
 
-/** Isay, a small round fish who keeps the day's paalala. */
-export function IsayFace({ size = 64, mood = 'happy' }: { size?: number; mood?: 'happy' | 'worried' }) {
+// The mascot is a Siamese cat in a fish-vendor apron. Each mood is a short
+// animated WebP cut from the Flow videos; idle loops, the others play once
+// and hand back to idle.
+type Mood = 'idle' | 'happy' | 'worried';
+
+const CLIPS: Record<Mood, number> = {
+  idle: require('../../assets/mascot/idle.webp'),
+  happy: require('../../assets/mascot/happy.webp'),
+  worried: require('../../assets/mascot/worried.webp'),
+};
+/** How long a reaction shows before she settles back to idle. */
+const REACTION_MS: Record<Exclude<Mood, 'idle'>, number> = { happy: 4000, worried: 4000 };
+/** Matches the background of the clips so the tile edge disappears. */
+const CLIP_BG = '#F4E9D8';
+
+/** The clips carry margin for her wave, so zoom in a little and let the tile trim it. */
+const ZOOM = 1.18;
+
+export function MascotFace({ size = 82, mood }: { size?: number; mood: Mood }) {
+  const inner = size * ZOOM;
+  const offset = (size - inner) / 2;
   return (
-    <Svg width={size} height={size} viewBox="0 0 64 64">
-      <Path d="M45 32 L61 19 Q56.5 32 61 45 Z" fill="#E07A5F" />
-      <Path d="M19 15 Q28 3 39 15 Z" fill="#E07A5F" />
-      <Ellipse cx={28} cy={32} rx={22} ry={19} fill="#2C7C88" />
-      <Path d="M10 38 Q28 54 46 38 Q40 50 28 50.5 Q15 50 10 38 Z" fill="#8FCBC3" />
-      <G stroke="#57A3A9" strokeWidth={1.4} fill="none" strokeLinecap="round">
-        <Path d="M33 22 q3 3 0 6" />
-        <Path d="M39 25 q3 3 0 6" />
-        <Path d="M36 31 q3 3 0 6" />
-      </G>
-      <Path d="M27 38 q7 7 13 1.5 q-5 -5.5 -13 -1.5 Z" fill="#1F6570" />
-      <Circle cx={18} cy={27} r={7.2} fill="#FFFFFF" />
-      <Circle cx={17} cy={28} r={3.8} fill="#12303B" />
-      <Circle cx={15.6} cy={26.4} r={1.3} fill="#FFFFFF" />
-      <Ellipse cx={24.5} cy={36.5} rx={3.2} ry={1.9} fill="#F2A08B" opacity={0.75} />
-      {mood === 'happy' ? (
-        <Path d="M9.5 36.5 q4 4.5 9 1" stroke="#12303B" strokeWidth={1.8} fill="none" strokeLinecap="round" />
-      ) : (
-        <Path d="M10 39 q4 -3 8.5 0" stroke="#12303B" strokeWidth={1.8} fill="none" strokeLinecap="round" />
-      )}
-    </Svg>
+    <View style={[styles.face, { width: size, height: size, borderRadius: size * 0.3 }]}>
+      <Image
+        source={CLIPS[mood]}
+        style={{ width: inner, height: inner, marginLeft: offset, marginTop: offset }}
+        contentFit="cover"
+        autoplay
+      />
+    </View>
   );
+}
+
+/** Plays a reaction for each new message, then returns to the idle loop. */
+function useMood(tone: Nudge['tone'], index: number): [Mood, string] {
+  const reaction: Mood = tone === 'warn' ? 'worried' : tone === 'good' || index === 0 ? 'happy' : 'idle';
+  const message = `${index}-${tone}`;
+  const [settled, setSettled] = useState<string | null>(null);
+  useEffect(() => {
+    if (reaction === 'idle') return;
+    const t = setTimeout(() => setSettled(message), REACTION_MS[reaction]);
+    return () => clearTimeout(t);
+  }, [message, reaction]);
+  const mood = settled === message ? 'idle' : reaction;
+  // A new key restarts the clip from its first frame.
+  return [mood, `${message}-${mood}`];
 }
 
 export function PaalalaCard() {
@@ -40,26 +61,12 @@ export function PaalalaCard() {
   const [i, setI] = useState(0);
   const current = messages[Math.min(i, messages.length - 1)];
 
-  const [bob] = useState(() => new Animated.Value(0));
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bob, { toValue: 1, duration: 1600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(bob, { toValue: 0, duration: 1600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [bob]);
-  const translateY = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -4] });
-
   const warn = current.tone === 'warn';
+  const [mood, clipKey] = useMood(current.tone, i);
 
   return (
     <View style={styles.wrap}>
-      <Animated.View style={{ transform: [{ translateY }], marginTop: 8 }}>
-        <IsayFace size={62} mood={warn ? 'worried' : 'happy'} />
-      </Animated.View>
+      <MascotFace key={clipKey} mood={mood} />
       <Pressable
         onPress={() => setI((n) => (n + 1) % messages.length)}
         style={[styles.bubble, warn && { borderColor: '#E9C3B6' }]}
@@ -67,7 +74,7 @@ export function PaalalaCard() {
       >
         <View style={[styles.tail, warn && { borderColor: '#E9C3B6' }]} />
         <View style={styles.head}>
-          <T v="strong" c={color.sea} style={{ fontFamily: font.bold }}>Isay</T>
+          <T v="strong" c={color.sea} style={{ fontFamily: font.bold }}>{MASCOT_NAME}</T>
           <T v="caption" style={{ fontSize: 12 }}>
             {i === 0 ? 'Paalala ngayong araw' : warn ? 'Paalala' : 'Balita'}
           </T>
@@ -95,7 +102,8 @@ export function PaalalaCard() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 16 },
+  wrap: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 16 },
+  face: { overflow: 'hidden', backgroundColor: CLIP_BG },
   bubble: {
     flex: 1,
     backgroundColor: color.card,
@@ -110,7 +118,7 @@ const styles = StyleSheet.create({
   tail: {
     position: 'absolute',
     left: -7,
-    top: 16,
+    top: 26,
     width: 12,
     height: 12,
     backgroundColor: color.card,
