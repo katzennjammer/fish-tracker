@@ -26,7 +26,7 @@ export default function ExpenseScreen() {
     setBusy(true);
     try {
       await addExpense({ date, category: finalCategory, amount, note: note.trim() });
-      done();
+      done('Expense saved');
     } finally {
       setBusy(false);
     }

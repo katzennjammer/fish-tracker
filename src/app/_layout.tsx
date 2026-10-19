@@ -23,6 +23,7 @@ import { syncReminders } from '../lib/notify';
 import { autoBackup } from '../lib/backup';
 import { color } from '../lib/theme';
 import { PinPad } from '../components/PinPad';
+import { DialogHost } from '../components/DialogHost';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -97,6 +98,7 @@ export default function RootLayout() {
         </Stack>
       </SQLiteProvider>
       {pin && locked ? <PinPad mode="unlock" expected={pin} onDone={() => setLocked(false)} /> : null}
+      <DialogHost />
     </SafeAreaProvider>
   );
 }

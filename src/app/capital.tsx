@@ -34,7 +34,7 @@ export default function CapitalScreen() {
     setBusy(true);
     try {
       await setOpeningCash(date, toCents(value));
-      done();
+      done('Capital saved');
     } finally {
       setBusy(false);
     }

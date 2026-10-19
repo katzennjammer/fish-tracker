@@ -24,7 +24,7 @@ export default function SpoilageScreen() {
     setBusy(true);
     try {
       await addSpoilage({ date, fishId: fish.id, kg, note: note.trim() });
-      done();
+      done('Saved');
     } finally {
       setBusy(false);
     }

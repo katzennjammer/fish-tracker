@@ -31,7 +31,7 @@ export default function FishEditScreen() {
     setTried(true);
     if (!name.trim()) return;
     await saveFish({ id, name: name.trim(), sell_price: sellC, buy_price: buyC });
-    done();
+    done('Fish saved');
   }
 
   return (

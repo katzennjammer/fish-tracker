@@ -38,7 +38,7 @@ export default function NewLoanScreen() {
         lender: name, principal, total_payable: total, installments: count, frequency: freq, first_due: first, note: note.trim(),
       });
       syncReminders().catch(() => {});
-      done();
+      done('Loan saved — reminders are set');
     } finally {
       setBusy(false);
     }

@@ -6,7 +6,7 @@ import { getSetting, setDueNotifyIds, unpaidDues, type LoanDue } from './db';
 import { MASCOT_NAME, tipOfTheDay } from './tips';
 
 // Everything is a local notification planned on the phone:
-// - loans: 8 AM the day before a due date and 8 AM on the day itself
+// - loans: 8 AM three days before, the day before, and on the due date
 // - the morning paalala: 6 AM each day with that day's Tagalog tip
 
 const CHANNEL = 'reminders';
@@ -54,6 +54,7 @@ async function scheduleDue(due: LoanDue & { lender: string }) {
   await cancel(due.notify_ids);
   const ids: string[] = [];
   const plan: [number, string][] = [
+    [-3, `${due.lender} is due in 3 days`],
     [-1, `${due.lender} is due tomorrow`],
     [0, `${due.lender} is due today`],
   ];

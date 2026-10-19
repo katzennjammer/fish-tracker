@@ -32,7 +32,7 @@ export default function PaymentScreen() {
     setBusy(true);
     try {
       await addPayment({ date, personId, amount, note: note.trim() });
-      done();
+      done('Payment saved');
     } finally {
       setBusy(false);
     }

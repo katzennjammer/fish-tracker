@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Card, DateStepper, Empty, LedgerLine, Money, openEntry, Screen, Section, T, Tag } from '../../components/ui';
 import { Icon, type IconName } from '../../components/icons';
 import { PaalalaCard } from '../../components/Mascot';
@@ -8,15 +8,41 @@ import { greeting } from '../../lib/tips';
 import { dayActivity, daySummary, getSetting, upcomingDues, type Activity } from '../../lib/db';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
-import { longParts, relativeDay, short, today } from '../../lib/dates';
+import { addDays, daysBetween, longParts, relativeDay, short, today } from '../../lib/dates';
 import { color, font, space } from '../../lib/theme';
 
+/**
+ * The day on screen is kept as "days from today", so after midnight it moves
+ * to the new day by itself. It re-checks when the app comes back, when the
+ * tab is opened, and at midnight if the app is left open.
+ */
+function useCalendarDay(): [string, (d: string) => void] {
+  const [offset, setOffset] = useState(0);
+  const [, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  useFocusEffect(refresh);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => s === 'active' && refresh());
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+    const timer = setTimeout(refresh, midnight.getTime() - now.getTime());
+    return () => {
+      sub.remove();
+      clearTimeout(timer);
+    };
+  });
+
+  const date = addDays(today(), offset);
+  return [date, (d) => setOffset(daysBetween(today(), d))];
+}
+
 export default function TodayScreen() {
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useCalendarDay();
   const summary = useQuery(() => daySummary(date), [date]);
   const activity = useQuery(() => dayActivity(date), [date]);
   const owner = useQuery(() => getSetting('owner_name'), []);
-  const dues = useQuery(() => upcomingDues(2), []);
+  const dues = useQuery(() => upcomingDues(3), [date]);
   const isToday = date === today();
   const parts = longParts(date);
 
@@ -52,11 +78,21 @@ export default function TodayScreen() {
         summary.opened || summary.salesTotal > 0 || summary.expenses > 0 ? (
           <View style={styles.hero}>
             <View style={styles.heroHead}>
-              <T v="label" c={color.seaMuted}>{summary.closed ? 'Cash counted' : 'Cash in hand'}</T>
-              <Pressable onPress={() => go('/capital')} hitSlop={10}>
-                <T v="caption" c={color.seaMuted} style={{ textDecorationLine: 'underline' }}>Edit capital</T>
-              </Pressable>
+              {summary.closed ? (
+                <View style={styles.closedPill}>
+                  <Icon name="check" size={13} color={color.sea} strokeWidth={3} />
+                  <T v="label" c={color.sea} style={{ fontSize: 10.5 }}>Day closed</T>
+                </View>
+              ) : (
+                <T v="label" c={color.seaMuted}>Cash in hand</T>
+              )}
+              {summary.closed ? null : (
+                <Pressable onPress={() => go('/capital')} hitSlop={10}>
+                  <T v="caption" c={color.seaMuted} style={{ textDecorationLine: 'underline' }}>Edit capital</T>
+                </Pressable>
+              )}
             </View>
+            {summary.closed ? <T v="caption" c={color.seaMuted}>Cash you counted</T> : null}
             <Money cents={summary.closed && summary.counted !== null ? summary.counted : summary.expected} size={46} c={color.seaText} />
             {summary.closed && summary.counted !== null ? (
               <Difference counted={summary.counted} expected={summary.expected} />
@@ -70,6 +106,14 @@ export default function TodayScreen() {
             {summary.stockPaid ? <LedgerLine dim label="− Fish bought" value={peso(summary.stockPaid)} /> : null}
             {summary.supplierPayments ? <LedgerLine dim label="− Paid to suppliers" value={peso(summary.supplierPayments)} /> : null}
             {summary.expenses ? <LedgerLine dim label="− Expenses" value={peso(summary.expenses)} /> : null}
+            {summary.closed && isToday ? (
+              <View style={styles.tomorrow}>
+                <T v="caption" c={color.seaText}>
+                  This stays as today’s record. At 12 midnight the app starts a fresh day — you’ll set new capital in the
+                  morning.
+                </T>
+              </View>
+            ) : null}
           </View>
         ) : (
           <Pressable onPress={() => go('/capital')} style={({ pressed }) => [styles.hero, pressed && { opacity: 0.92 }]}>
@@ -221,6 +265,11 @@ const styles = StyleSheet.create({
     backgroundColor: color.sea, borderRadius: 22, padding: 20, marginTop: space.md, overflow: 'hidden',
   },
   heroHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  closedPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: color.seaText,
+    paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8,
+  },
+  tomorrow: { marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: color.seaSoft },
   heroRule: { height: 1, backgroundColor: color.seaSoft, marginVertical: 14 },
   heroCta: {
     flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 20,

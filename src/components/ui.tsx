@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -21,6 +20,7 @@ import { color, font, radius, space } from '../lib/theme';
 import { money } from '../lib/format';
 import { addDays, relativeDay, short, today } from '../lib/dates';
 import type { EntryTable } from '../lib/db';
+import { toast } from '../lib/dialog';
 import { Icon, type IconName } from './icons';
 
 /* ───────────── text ───────────── */
@@ -186,7 +186,7 @@ export function LedgerLine({
 
 /* ───────────── controls ───────────── */
 
-type ButtonKind = 'primary' | 'secondary' | 'danger' | 'ghost' | 'light';
+type ButtonKind = 'primary' | 'secondary' | 'danger' | 'dangerFill' | 'ghost' | 'light';
 
 export function Button({
   label, onPress, kind = 'primary', icon, disabled, style, small,
@@ -198,6 +198,7 @@ export function Button({
     primary: { bg: color.sea, fg: color.seaText, border: color.sea },
     secondary: { bg: 'transparent', fg: color.ink, border: color.ink },
     danger: { bg: 'transparent', fg: color.red, border: color.red },
+    dangerFill: { bg: color.red, fg: '#FFFFFF', border: color.red },
     ghost: { bg: color.sunk, fg: color.ink, border: color.sunk },
     light: { bg: color.card, fg: color.sea, border: color.card },
   };
@@ -364,27 +365,16 @@ export function DateStepper({ value, onChange, max = today() }: { value: string;
   );
 }
 
-export function confirm(title: string, message: string, destructiveLabel = 'Delete'): Promise<boolean> {
-  if (Platform.OS === 'web') return Promise.resolve(globalThis.confirm?.(`${title}\n\n${message}`) ?? false);
-  return new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-      { text: destructiveLabel, style: 'destructive', onPress: () => resolve(true) },
-    ]);
-  });
-}
-
-export function notice(title: string, message: string) {
-  if (Platform.OS === 'web') globalThis.alert?.(`${title}\n\n${message}`);
-  else Alert.alert(title, message);
-}
+export { confirm, notice, toast } from '../lib/dialog';
 
 /** Open a record's sheet, where it can be marked as paid or deleted. */
 export function openEntry(table: EntryTable, id: number) {
   router.push({ pathname: '/entry', params: { table, id: String(id) } });
 }
 
-export function done() {
+/** Close a form; an optional message shows as a toast. */
+export function done(message?: string) {
+  if (message) toast(message);
   if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   router.back();
 }

@@ -28,7 +28,7 @@ export default function PersonEditScreen() {
     setTried(true);
     if (!name.trim()) return;
     await savePerson({ id, name: name.trim(), phone: phone.trim(), kind, note: note.trim() });
-    done();
+    done('Saved');
   }
 
   async function remove() {

@@ -59,14 +59,14 @@ export default function EntryScreen() {
       forEntry: e.id,
       note: `For ${e.title} ${short(e.date)}`,
     });
-    done();
+    done('Marked as paid');
   }
 
   async function remove() {
     const ok = await confirm('Delete this record?', `${TITLES[table]} — ${describe(e)}. This cannot be undone.`);
     if (!ok) return;
     await deleteEntry(table, id);
-    done();
+    done('Deleted');
   }
 
   return (

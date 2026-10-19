@@ -4,7 +4,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { File, Paths } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
-import { Button, Card, confirm, Divider, Field, IconButton, notice, PageHeader, Screen, Section, T } from '../components/ui';
+import { Button, Card, confirm, Divider, Field, IconButton, notice, PageHeader, Screen, Section, T, toast } from '../components/ui';
 import { counts, exportAll, getSetting, importAll, setSetting, type Backup } from '../lib/db';
 import { getPin, setPin } from '../lib/pin';
 import { syncReminders } from '../lib/notify';
@@ -44,7 +44,7 @@ export default function SettingsScreen() {
   async function saveNames() {
     await setSetting('owner_name', owner.trim());
     await setSetting('stall_name', stall.trim());
-    notice('Saved', 'Names updated.');
+    toast('Names saved');
   }
 
   async function toggleMorning(on: boolean) {
@@ -93,9 +93,9 @@ export default function SettingsScreen() {
       await autoBackup(true).catch(() => null);
       await importAll(data);
       syncReminders().catch(() => {});
-      notice('Restored', 'Your records are back.');
+      toast('Restored — your records are back');
     } catch (e) {
-      notice('Could not restore', e instanceof Error ? e.message : 'The file could not be read.');
+      notice('Could not restore', e instanceof Error ? e.message : 'The file could not be read.', 'error');
     }
   }
 
@@ -103,14 +103,14 @@ export default function SettingsScreen() {
     try {
       if (await chooseBackupFolder()) notice('Folder saved', 'A backup was saved there now, and will be every day.');
     } catch (e) {
-      notice('Could not use that folder', e instanceof Error ? e.message : 'Try another folder, like Download.');
+      notice('Could not use that folder', e instanceof Error ? e.message : 'Try another folder, like Download.', 'error');
     }
   }
 
   async function backupNow() {
     const r = await autoBackup(true);
-    if (r?.folder === 'failed') notice('Saved in the app only', 'The backup folder could not be written. Choose it again.');
-    else notice('Backup saved', r?.folder === 'saved' ? 'Saved in the app and in your backup folder.' : 'Saved in the app.');
+    if (r?.folder === 'failed') notice('Saved in the app only', 'The backup folder could not be written. Choose it again.', 'error');
+    else toast(r?.folder === 'saved' ? 'Backup saved in the app and your folder' : 'Backup saved in the app');
   }
 
   async function restoreLocal(b: BackupFile) {
@@ -126,9 +126,9 @@ export default function SettingsScreen() {
       await autoBackup(true);
       await importAll(data);
       syncReminders().catch(() => {});
-      notice('Restored', `Records are back to ${short(b.date)}.`);
+      toast(`Restored — records are back to ${short(b.date)}`);
     } catch (e) {
-      notice('Could not restore', e instanceof Error ? e.message : 'The copy could not be read.');
+      notice('Could not restore', e instanceof Error ? e.message : 'The copy could not be read.', 'error');
     }
   }
 

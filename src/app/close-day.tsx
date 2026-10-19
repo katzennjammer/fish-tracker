@@ -29,7 +29,7 @@ export default function CloseDayScreen() {
       await closeDay(date, toCents(counted));
       // Closing the day is a good moment to refresh today's backup.
       autoBackup(true).catch(() => {});
-      done();
+      done('Day closed');
     } finally {
       setBusy(false);
     }
@@ -39,7 +39,7 @@ export default function CloseDayScreen() {
     setBusy(true);
     try {
       await closeDay(date, null);
-      done();
+      done('Day reopened');
     } finally {
       setBusy(false);
     }

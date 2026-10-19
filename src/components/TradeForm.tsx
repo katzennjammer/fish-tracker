@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { Button, DateStepper, Field, notice, Screen, Segmented, SheetHeader, T, done } from './ui';
+import { Button, DateStepper, Field, toast, Screen, Segmented, SheetHeader, T, done } from './ui';
 import { FishPicker, PersonPicker } from './pickers';
 import { addPurchase, addSale, type FishWithStock } from '../lib/db';
 import { centsToInput, kg as fmtKg, parseAmount, peso, toCents } from '../lib/format';
@@ -64,9 +64,9 @@ export function TradeForm({ kind }: { kind: 'sale' | 'purchase' }) {
           setMode('full');
           setPersonId(null);
         }
-        notice('Saved', `${fish.name} ${fmtKg(kgValue)} — ${peso(total)}`);
+        toast(`Saved · ${fish.name} ${fmtKg(kgValue)} — ${peso(total)}`);
       } else {
-        done();
+        done(isSale ? 'Sale saved' : 'Stock saved');
       }
     } finally {
       setBusy(false);
