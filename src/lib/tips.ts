@@ -3,7 +3,7 @@ import { peso } from './format';
 import { daySummary, getDay, listPeople, upcomingDues } from './db';
 
 /** The Siamese cat who delivers the paalala. */
-export const MASCOT_NAME = 'Mingming';
+export const MASCOT_NAME = 'Yuki';
 
 // Daily paalala in Tagalog. One saying per day (the same all day, a new one
 // tomorrow), plus reminders built from her own records.
@@ -61,10 +61,9 @@ export function tipOfTheDay(date = today()): string {
 
 export function greeting(now = new Date()): string {
   const h = now.getHours();
-  if (h < 11) return 'Magandang umaga';
-  if (h < 13) return 'Magandang tanghali';
-  if (h < 18) return 'Magandang hapon';
-  return 'Magandang gabi';
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
 }
 
 export type Nudge = { text: string; tone: 'tip' | 'warn' | 'good'; link?: string };
