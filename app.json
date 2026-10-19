@@ -15,7 +15,7 @@
       "package": "com.katzennjammer.fishledger",
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "backgroundColor": "#F5EAD2",
+        "backgroundColor": "#174453",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png"
       },
