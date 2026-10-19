@@ -1,4 +1,4 @@
-# Fish Ledger
+# Analou Tracker
 
 A notebook-ledger app for a market fish vendor. It runs on her phone with no
 account and no internet: everything is stored in a SQLite file on the device.

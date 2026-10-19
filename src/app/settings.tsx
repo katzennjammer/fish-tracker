@@ -72,7 +72,7 @@ export default function SettingsScreen() {
       const file = new File(Paths.cache, name);
       file.create({ overwrite: true });
       file.write(json);
-      await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save your Fish Ledger backup' });
+      await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save your Analou Tracker backup' });
     }
     await setSetting('last_backup', today());
   }
@@ -239,7 +239,7 @@ export default function SettingsScreen() {
       </Section>
 
       <T v="caption" style={{ textAlign: 'center', marginTop: space.xxl }} c={color.inkFaint}>
-        Fish Ledger · made for Mama
+        Analou Tracker · made for Mama
       </T>
     </Screen>
   );

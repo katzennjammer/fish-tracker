@@ -224,7 +224,7 @@ function Entry({
 }
 
 async function shareStatement(p: PersonSummary, ledger: LedgerEntry[]) {
-  const stall = (await getSetting('stall_name')) || 'Fish stall';
+  const stall = (await getSetting('stall_name')) || 'Analou Tracker';
   const lines = ledger.slice(-12).map((e) =>
     e.kind === 'payment'
       ? `${short(e.date)}  Paid  −${peso(e.total)}`

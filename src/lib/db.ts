@@ -870,7 +870,7 @@ export async function exportAll(): Promise<Backup> {
 
 export async function importAll(backup: Backup) {
   if (backup?.app !== 'fish-ledger' || typeof backup.tables !== 'object') {
-    throw new Error('This file is not a Fish Ledger backup.');
+    throw new Error('This file is not an Analou Tracker backup.');
   }
   await db.withTransactionAsync(async () => {
     for (const t of [...TABLES].reverse()) await db.runAsync(`DELETE FROM ${t}`);
