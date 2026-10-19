@@ -1,8 +1,9 @@
 import { Linking, Pressable, Share, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, Card, confirm, Empty, Money, PageHeader, Screen, Section, T, Tag } from '../../components/ui';
+import { Button, Card, confirm, Empty, Money, openEntry, PageHeader, Screen, Section, T, Tag } from '../../components/ui';
 import { Icon } from '../../components/icons';
-import { deleteEntry, getPerson, getSetting, personLedger, type LedgerEntry, type PersonSummary } from '../../lib/db';
+import { addPayment, getPerson, getSetting, personLedger, type LedgerEntry, type PersonSummary } from '../../lib/db';
+import { settle, type Settlement } from '../../lib/settle';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
 import { ago, daysBetween, short, today } from '../../lib/dates';
@@ -27,6 +28,7 @@ export default function PersonScreen() {
   const tone = person.balance > 0 ? (isCustomer ? color.red : color.brass) : color.green;
 
   const rows = withRunningBalance(ledger);
+  const settled = settle(ledger);
 
   const openSince = openSinceDate(ledger);
   const quiet = person.balance > 0 ? daysBetween(person.last_payment ?? openSince ?? today(), today()) : 0;
@@ -84,7 +86,17 @@ export default function PersonScreen() {
         ) : null}
       </View>
 
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: space.md }}>
+      {person.balance > 0 ? (
+        <Button
+          small
+          kind="secondary"
+          icon="check"
+          label={isCustomer ? `Paid in full · ${peso(person.balance)}` : `I paid in full · ${peso(person.balance)}`}
+          onPress={() => payInFull(person)}
+          style={{ marginTop: space.md }}
+        />
+      ) : null}
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
         <Button small kind="secondary" icon="share" label="Send balance" onPress={() => shareStatement(person, ledger)} style={{ flex: 1 }} />
         {person.phone ? (
           <Button small kind="secondary" icon="phone" label="Call" onPress={() => Linking.openURL(`tel:${person.phone}`)} style={{ flex: 1 }} />
@@ -96,13 +108,20 @@ export default function PersonScreen() {
         <Total label="Total paid" value={peso(person.paid)} />
       </View>
 
-      <Section title="History" right={rows.length ? <T v="caption">Hold to delete</T> : null}>
+      <Section title="History" right={rows.length ? <T v="caption">Tap to open</T> : null}>
         {rows.length === 0 ? (
           <Card><Empty icon="receipt" title="No entries yet" body="Utang and payments for this person will show here." /></Card>
         ) : (
           <Card style={{ padding: 0, overflow: 'hidden' }}>
             {rows.map(({ e, after }, i) => (
-              <Entry key={`${e.kind}-${e.id}`} e={e} after={after} last={i === rows.length - 1} isCustomer={isCustomer} />
+              <Entry
+                key={`${e.kind}-${e.id}`}
+                e={e}
+                after={after}
+                last={i === rows.length - 1}
+                isCustomer={isCustomer}
+                settlement={settled.get(e.id)}
+              />
             ))}
           </Card>
         )}
@@ -156,28 +175,41 @@ function Total({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Entry({ e, after, last, isCustomer }: { e: LedgerEntry; after: number; last: boolean; isCustomer: boolean }) {
+async function payInFull(p: PersonSummary) {
+  const msg = p.kind === 'customer'
+    ? `${p.name} paid all ${peso(p.balance)} today. Their balance becomes zero.`
+    : `You paid ${p.name} all ${peso(p.balance)} today. What you owe becomes zero.`;
+  if (!(await confirm('Paid in full?', msg, 'Yes, paid'))) return;
+  await addPayment({ date: today(), personId: p.id, amount: p.balance, note: 'Paid in full' });
+}
+
+/** Paid / partly paid / unpaid, worked out from the payments that followed. */
+function StatusTag({ s, isCustomer }: { s: Settlement; isCustomer: boolean }) {
+  if (s.owed <= 0) return <Tag label="PAID" tone="green" />;
+  if (s.left === 0) return <Tag label={`PAID ✓ ${s.settledOn ? short(s.settledOn) : ''}`} tone="green" />;
+  if (s.left < s.owed) return <Tag label={`${peso(s.left)} LEFT`} tone="brass" />;
+  return <Tag label="UNPAID" tone={isCustomer ? 'red' : 'brass'} />;
+}
+
+function Entry({
+  e, after, last, isCustomer, settlement,
+}: { e: LedgerEntry; after: number; last: boolean; isCustomer: boolean; settlement?: Settlement }) {
   const isPay = e.kind === 'payment';
   const table = e.kind === 'sale' ? 'sales' : e.kind === 'purchase' ? 'purchases' : 'payments';
-
-  async function remove() {
-    const what = isPay ? `Payment of ${peso(e.total)}` : `${e.fish} ${kg(e.kg ?? 0)} — ${peso(e.total)}`;
-    if (await confirm('Delete this entry?', `${what} on ${short(e.date)}. The balance will change.`)) {
-      await deleteEntry(table, e.id);
-    }
-  }
+  const open = () => openEntry(table, e.id);
 
   return (
-    <Pressable onLongPress={remove} style={({ pressed }) => [styles.entry, !last && styles.entryLine, pressed && { backgroundColor: color.sunk }]}>
+    <Pressable onPress={open} onLongPress={open} style={({ pressed }) => [styles.entry, !last && styles.entryLine, pressed && { backgroundColor: color.sunk }]}>
       <View style={[styles.dot, { backgroundColor: isPay ? color.green : isCustomer ? color.red : color.brass }]} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <T v="strong" numberOfLines={1} style={{ flexShrink: 1 }}>{isPay ? 'Payment' : e.fish}</T>
-          {!isPay && e.paid > 0 ? <Tag label={`PAID ${peso(e.paid)}`} tone="green" /> : null}
+          {!isPay && settlement ? <StatusTag s={settlement} isCustomer={isCustomer} /> : null}
         </View>
         <T v="caption" numberOfLines={2}>
           {short(e.date, true)}
           {!isPay && e.kg !== null && e.price !== null ? ` · ${kg(e.kg)} × ${peso(e.price)} = ${peso(e.total)}` : ''}
+          {!isPay && e.paid > 0 ? ` · paid ${peso(e.paid)} then` : ''}
           {e.note ? ` · ${e.note}` : ''}
         </T>
       </View>

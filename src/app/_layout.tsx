@@ -20,6 +20,7 @@ import {
 import { migrate, seedFishIfEmpty } from '../lib/db';
 import { getPin } from '../lib/pin';
 import { syncReminders } from '../lib/notify';
+import { autoBackup } from '../lib/backup';
 import { color } from '../lib/theme';
 import { PinPad } from '../components/PinPad';
 
@@ -88,7 +89,7 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(tabs)" />
-          {['sale', 'purchase', 'payment', 'expense', 'capital', 'close-day', 'spoilage', 'person/edit', 'fish/edit', 'loans/new', 'pin'].map(
+          {['entry', 'sale', 'purchase', 'payment', 'expense', 'capital', 'close-day', 'spoilage', 'person/edit', 'fish/edit', 'loans/new', 'pin'].map(
             (name) => (
               <Stack.Screen key={name} name={name} options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
             ),
@@ -100,16 +101,21 @@ export default function RootLayout() {
   );
 }
 
-/** Re-plan loan and morning reminders once the database is ready. */
+/** Once the database is ready: re-plan reminders and take the day's backup. */
 function Reminders() {
   useEffect(() => {
     syncReminders().catch((e) => console.warn('reminders', e));
+    autoBackup().catch((e) => console.warn('backup', e));
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') autoBackup().catch((e) => console.warn('backup', e));
+    });
     if (__DEV__ && Platform.OS === 'web') {
       // Lets the browser preview load sample data from the console.
       import('../lib/demo').then((m) => {
         (globalThis as { seedDemo?: () => Promise<void> }).seedDemo = m.seedDemo;
       });
     }
+    return () => sub.remove();
   }, []);
   return null;
 }

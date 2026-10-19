@@ -20,6 +20,7 @@ import * as Haptics from 'expo-haptics';
 import { color, font, radius, space } from '../lib/theme';
 import { money } from '../lib/format';
 import { addDays, relativeDay, short, today } from '../lib/dates';
+import type { EntryTable } from '../lib/db';
 import { Icon, type IconName } from './icons';
 
 /* ───────────── text ───────────── */
@@ -376,6 +377,11 @@ export function confirm(title: string, message: string, destructiveLabel = 'Dele
 export function notice(title: string, message: string) {
   if (Platform.OS === 'web') globalThis.alert?.(`${title}\n\n${message}`);
   else Alert.alert(title, message);
+}
+
+/** Open a record's sheet, where it can be marked as paid or deleted. */
+export function openEntry(table: EntryTable, id: number) {
+  router.push({ pathname: '/entry', params: { table, id: String(id) } });
 }
 
 export function done() {

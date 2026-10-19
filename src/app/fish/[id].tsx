@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, Card, confirm, Empty, LedgerLine, PageHeader, Screen, Section, T, Tag } from '../../components/ui';
-import { deleteEntry, fishHistory, getFish, setFishArchived, type FishMovement } from '../../lib/db';
+import { Button, Card, confirm, Empty, LedgerLine, openEntry, PageHeader, Screen, Section, T, Tag } from '../../components/ui';
+import { fishHistory, getFish, setFishArchived, type FishMovement } from '../../lib/db';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
 import { short } from '../../lib/dates';
@@ -56,7 +56,7 @@ export default function FishDetailScreen() {
         </Card>
       ) : null}
 
-      <Section title="Recent movement" right={history?.length ? <T v="caption">Hold to delete</T> : null}>
+      <Section title="Recent movement" right={history?.length ? <T v="caption">Tap to open</T> : null}>
         {history && history.length === 0 ? (
           <Card><Empty icon="fish" title="No records yet" body="Sales, purchases and spoilage of this fish appear here." /></Card>
         ) : (
@@ -73,11 +73,9 @@ function Move({ m, last }: { m: FishMovement; last: boolean }) {
   const label = m.kind === 'sale' ? 'Sold' : m.kind === 'purchase' ? 'Bought' : 'Spoiled';
   const tone = m.kind === 'sale' ? 'green' : m.kind === 'purchase' ? 'neutral' : 'red';
   const table = m.kind === 'sale' ? 'sales' : m.kind === 'purchase' ? 'purchases' : 'spoilage';
-  async function remove() {
-    if (await confirm('Delete this entry?', `${label} ${kg(m.kg)} on ${short(m.date)}.`)) await deleteEntry(table, m.id);
-  }
+  const open = () => openEntry(table, m.id);
   return (
-    <Pressable onLongPress={remove} style={({ pressed }) => [styles.row, !last && styles.line, pressed && { backgroundColor: color.sunk }]}>
+    <Pressable onPress={open} onLongPress={open} style={({ pressed }) => [styles.row, !last && styles.line, pressed && { backgroundColor: color.sunk }]}>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           <Tag label={label.toUpperCase()} tone={tone} />

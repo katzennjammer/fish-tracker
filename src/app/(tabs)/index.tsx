@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Card, confirm, DateStepper, Empty, LedgerLine, Money, Screen, Section, T, Tag } from '../../components/ui';
+import { Card, DateStepper, Empty, LedgerLine, Money, openEntry, Screen, Section, T, Tag } from '../../components/ui';
 import { Icon, type IconName } from '../../components/icons';
 import { PaalalaCard } from '../../components/Mascot';
 import { greeting } from '../../lib/tips';
-import { dayActivity, daySummary, deleteEntry, getSetting, upcomingDues, type Activity } from '../../lib/db';
+import { dayActivity, daySummary, getSetting, upcomingDues, type Activity } from '../../lib/db';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
 import { longParts, relativeDay, short, today } from '../../lib/dates';
@@ -107,7 +107,7 @@ export default function TodayScreen() {
 
       <Section
         title={isToday ? 'Today’s entries' : `Entries · ${relativeDay(date) ?? short(date)}`}
-        right={activity && activity.length ? <T v="caption">Hold to delete</T> : null}
+        right={activity && activity.length ? <T v="caption">Tap to open</T> : null}
       >
         {activity && activity.length ? (
           <Card style={{ padding: 0, overflow: 'hidden' }}>
@@ -189,13 +189,10 @@ function ActivityRow({ a, last }: { a: Activity; last: boolean }) {
     tag = a.paid === 0 ? <Tag label="CREDIT" tone="red" /> : <Tag label={`PAID ${peso(a.paid)}`} tone="brass" />;
   }
 
-  async function remove() {
-    const ok = await confirm('Delete this entry?', `${a.title} — ${peso(a.amount)}. This cannot be undone.`);
-    if (ok) await deleteEntry(a.table, a.id);
-  }
+  const open = () => openEntry(a.table, a.id);
 
   return (
-    <Pressable onLongPress={remove} style={({ pressed }) => [styles.entry, !last && styles.entryLine, pressed && { backgroundColor: color.sunk }]}>
+    <Pressable onPress={open} onLongPress={open} style={({ pressed }) => [styles.entry, !last && styles.entryLine, pressed && { backgroundColor: color.sunk }]}>
       <View style={{ flex: 1, minWidth: 0 }}>
         <T v="strong" numberOfLines={1}>{a.title}</T>
         <T v="caption" numberOfLines={1}>{detail}</T>

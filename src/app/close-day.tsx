@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Button, Card, Field, LedgerLine, Screen, SheetHeader, T, done } from '../components/ui';
 import { closeDay, daySummary } from '../lib/db';
+import { autoBackup } from '../lib/backup';
 import { useQuery } from '../lib/useQuery';
 import { centsToInput, parseAmount, peso, toCents } from '../lib/format';
 import { short, today } from '../lib/dates';
@@ -26,6 +27,8 @@ export default function CloseDayScreen() {
     setBusy(true);
     try {
       await closeDay(date, toCents(counted));
+      // Closing the day is a good moment to refresh today's backup.
+      autoBackup(true).catch(() => {});
       done();
     } finally {
       setBusy(false);

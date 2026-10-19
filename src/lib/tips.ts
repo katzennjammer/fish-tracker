@@ -1,6 +1,6 @@
 import { addDays, daysBetween, relativeDay, today } from './dates';
 import { peso } from './format';
-import { daySummary, getDay, listPeople, upcomingDues } from './db';
+import { counts, daySummary, getDay, getSetting, listPeople, upcomingDues } from './db';
 
 /** The Siamese cat who delivers the paalala. */
 export const MASCOT_NAME = 'Yuki';
@@ -108,6 +108,16 @@ export async function nudges(): Promise<Nudge[]> {
     const diff = yesterday.counted - yesterday.expected;
     if (diff < 0) out.push({ text: `Kulang ng ${peso(-diff)} ang bilang kahapon. Baka may gastos o bili na hindi nailista.`, tone: 'warn' });
     else if (diff === 0) out.push({ text: 'Sakto ang bilang ng pera kahapon. Ang galing!', tone: 'good' });
+  }
+
+  const lastCopy = await getSetting('last_backup');
+  const hasFolder = !!(await getSetting('backup_folder'));
+  if (!hasFolder && (await counts()).sales >= 10 && (!lastCopy || daysBetween(lastCopy, t) >= 7)) {
+    out.push({
+      text: 'Isang linggo na mula nang huling backup sa labas ng app. Magpadala ng kopya o pumili ng backup folder para hindi mawala ang listahan.',
+      tone: 'tip',
+      link: '/settings',
+    });
   }
 
   return out;

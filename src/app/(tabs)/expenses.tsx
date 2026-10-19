@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { Card, confirm, Empty, IconButton, Money, PageHeader, Screen, Section, T } from '../../components/ui';
+import { Card, Empty, IconButton, Money, openEntry, PageHeader, Screen, Section, T } from '../../components/ui';
 import { PeriodBar } from '../../components/PeriodBar';
-import { deleteEntry, listExpenses, type Expense } from '../../lib/db';
+import { listExpenses, type Expense } from '../../lib/db';
 import { useQuery } from '../../lib/useQuery';
 import { peso } from '../../lib/format';
 import { daysBetween, periodRange, relativeDay, short, today, type Period } from '../../lib/dates';
@@ -61,7 +61,7 @@ export default function ExpensesScreen() {
         ) : null}
       </Card>
 
-      <Section title="Entries" right={groups.length ? <T v="caption">Hold to delete</T> : null}>
+      <Section title="Entries" right={groups.length ? <T v="caption">Tap to open</T> : null}>
         {expenses && expenses.length === 0 ? (
           <Card>
             <Empty icon="receipt" title="No expenses" body="Ice, transport, bags, rent — add them so you see your real profit." />
@@ -86,12 +86,11 @@ export default function ExpensesScreen() {
 }
 
 function ExpenseRow({ e, last }: { e: Expense; last: boolean }) {
-  async function remove() {
-    if (await confirm('Delete this expense?', `${e.category} — ${peso(e.amount)}`)) await deleteEntry('expenses', e.id);
-  }
+  const open = () => openEntry('expenses', e.id);
   return (
     <Pressable
-      onLongPress={remove}
+      onPress={open}
+      onLongPress={open}
       style={({ pressed }) => [styles.row, !last && styles.line, pressed && { backgroundColor: color.sunk }]}
     >
       <View style={{ flex: 1 }}>

@@ -13,6 +13,15 @@ account and no internet: everything is stored in a SQLite file on the device.
 | **Expenses** | Daily / weekly / monthly totals by category (ice, transport, bags, rent…). |
 | **More** | **Online loans** (GLoan, SLoan, Tala, Home Credit…) with a payment schedule and phone reminders the day before and on each due date. **Profit** report: sales − cost of fish − spoilage − expenses, best sellers, sales per day. **Settings**: names, PIN lock, 6 AM morning paalala, backup/restore. |
 
+Tap any record to open it: **Mark as paid** or **Delete record**. Payments
+settle the oldest utang first, so each utang shows *PAID ✓ date*, *₱x left* or
+*UNPAID* by itself; a person page also has **Paid in full**.
+
+**Backups are automatic**: once a day (and when she closes the day) a dated
+copy is saved inside the app and, if she picks one, to a phone folder such as
+Download that survives uninstalling. Settings lists the last 14 copies to
+restore or delete, and **Send backup** shares a copy to Messenger/Drive.
+
 Sales can be **paid full**, **partial**, or **utang** — the unpaid part goes to
 that customer's balance automatically. Stock bought from suppliers works the same
 way.

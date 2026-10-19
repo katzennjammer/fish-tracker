@@ -16,7 +16,7 @@ function changed() {
   listeners.forEach((fn) => fn());
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export async function migrate(database: SQLiteDatabase) {
   db = database;
@@ -137,6 +137,10 @@ export async function migrate(database: SQLiteDatabase) {
       );
       CREATE INDEX IF NOT EXISTS loan_dues_loan ON loan_dues(loan_id);
     `);
+  }
+  if (version < 2) {
+    // A payment can name the sale/purchase it settles ("Mark as paid").
+    await db.execAsync('ALTER TABLE payments ADD COLUMN for_entry INTEGER');
   }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -337,19 +341,22 @@ export type LedgerEntry = {
   paid: number;
   note: string;
   created_at: string;
+  /** Payments only: the sale/purchase this payment was marked against. */
+  for_entry: number | null;
 };
 
 /** Oldest first so a running balance can be drawn. */
 export async function personLedger(id: number): Promise<LedgerEntry[]> {
   return db.getAllAsync<LedgerEntry>(
     `SELECT * FROM (
-       SELECT 'sale' AS kind, s.id, s.date, f.name AS fish, s.kg, s.price, s.total, s.paid, s.note, s.created_at
+       SELECT 'sale' AS kind, s.id, s.date, f.name AS fish, s.kg, s.price, s.total, s.paid, s.note, s.created_at,
+              NULL AS for_entry
          FROM sales s JOIN fish f ON f.id = s.fish_id WHERE s.customer_id = ?
        UNION ALL
-       SELECT 'purchase', u.id, u.date, f.name, u.kg, u.price, u.total, u.paid, u.note, u.created_at
+       SELECT 'purchase', u.id, u.date, f.name, u.kg, u.price, u.total, u.paid, u.note, u.created_at, NULL
          FROM purchases u JOIN fish f ON f.id = u.fish_id WHERE u.supplier_id = ?
        UNION ALL
-       SELECT 'payment', y.id, y.date, NULL, NULL, NULL, y.amount, y.amount, y.note, y.created_at
+       SELECT 'payment', y.id, y.date, NULL, NULL, NULL, y.amount, y.amount, y.note, y.created_at, y.for_entry
          FROM payments y WHERE y.person_id = ?
      ) ORDER BY date, created_at`,
     [id, id, id],
@@ -382,10 +389,11 @@ export async function addPurchase(p: {
   changed();
 }
 
-export async function addPayment(p: { date: string; personId: number; amount: number; note?: string }) {
-  await db.runAsync('INSERT INTO payments (date, person_id, amount, note, created_at) VALUES (?, ?, ?, ?, ?)', [
-    p.date, p.personId, p.amount, p.note ?? '', nowStamp(),
-  ]);
+export async function addPayment(p: { date: string; personId: number; amount: number; note?: string; forEntry?: number }) {
+  await db.runAsync(
+    'INSERT INTO payments (date, person_id, amount, note, created_at, for_entry) VALUES (?, ?, ?, ?, ?, ?)',
+    [p.date, p.personId, p.amount, p.note ?? '', nowStamp(), p.forEntry ?? null],
+  );
   changed();
 }
 
@@ -398,8 +406,49 @@ export async function addSpoilage(s: { date: string; fishId: number; kg: number;
 
 export type EntryTable = 'sales' | 'purchases' | 'payments' | 'spoilage' | 'expenses';
 
+export type EntryDetail = {
+  table: EntryTable;
+  id: number;
+  date: string;
+  /** Fish name, expense category, or person name for a payment. */
+  title: string;
+  kg: number | null;
+  price: number | null;
+  total: number;
+  paid: number | null;
+  note: string;
+  person_id: number | null;
+  person: string | null;
+  person_kind: PersonKind | null;
+};
+
+export async function getEntry(table: EntryTable, id: number): Promise<EntryDetail | null> {
+  const sql: Record<EntryTable, string> = {
+    sales: `SELECT s.date, f.name AS title, s.kg, s.price, s.total, s.paid, s.note, p.id AS person_id, p.name AS person, p.kind AS person_kind
+            FROM sales s JOIN fish f ON f.id = s.fish_id LEFT JOIN people p ON p.id = s.customer_id WHERE s.id = ?`,
+    purchases: `SELECT u.date, f.name AS title, u.kg, u.price, u.total, u.paid, u.note, p.id AS person_id, p.name AS person, p.kind AS person_kind
+            FROM purchases u JOIN fish f ON f.id = u.fish_id LEFT JOIN people p ON p.id = u.supplier_id WHERE u.id = ?`,
+    payments: `SELECT y.date, p.name AS title, NULL AS kg, NULL AS price, y.amount AS total, y.amount AS paid, y.note,
+            p.id AS person_id, p.name AS person, p.kind AS person_kind FROM payments y JOIN people p ON p.id = y.person_id WHERE y.id = ?`,
+    spoilage: `SELECT w.date, f.name AS title, w.kg, NULL AS price, 0 AS total, NULL AS paid, w.note, NULL AS person_id, NULL AS person,
+            NULL AS person_kind FROM spoilage w JOIN fish f ON f.id = w.fish_id WHERE w.id = ?`,
+    expenses: `SELECT e.date, e.category AS title, NULL AS kg, NULL AS price, e.amount AS total, e.amount AS paid, e.note,
+            NULL AS person_id, NULL AS person, NULL AS person_kind FROM expenses e WHERE e.id = ?`,
+  };
+  const row = await db.getFirstAsync<Omit<EntryDetail, 'table' | 'id'>>(sql[table], [id]);
+  return row ? { ...row, table, id } : null;
+}
+
 export async function deleteEntry(table: EntryTable, id: number) {
   await db.runAsync(`DELETE FROM ${table} WHERE id = ?`, [id]);
+  if (table === 'sales' || table === 'purchases') {
+    // Its "mark as paid" payments stay as plain payments toward the balance.
+    const kind = table === 'sales' ? 'customer' : 'supplier';
+    await db.runAsync(
+      `UPDATE payments SET for_entry = NULL WHERE for_entry = ? AND person_id IN (SELECT id FROM people WHERE kind = ?)`,
+      [id, kind],
+    );
+  }
   changed();
 }
 
