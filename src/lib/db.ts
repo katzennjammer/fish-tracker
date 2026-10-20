@@ -16,7 +16,7 @@ function changed() {
   listeners.forEach((fn) => fn());
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export async function migrate(database: SQLiteDatabase) {
   db = database;
@@ -142,7 +142,72 @@ export async function migrate(database: SQLiteDatabase) {
     // A payment can name the sale/purchase it settles ("Mark as paid").
     await db.execAsync('ALTER TABLE payments ADD COLUMN for_entry INTEGER');
   }
+  if (version < 3) {
+    // Utang with no fish: balances from before the app ('old') and
+    // amount-only utang ('credit'). Payments can now name which kind of
+    // entry they were marked against.
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS balances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        amount INTEGER NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'old' CHECK (kind IN ('old', 'credit')),
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS balances_person ON balances(person_id);
+      ALTER TABLE payments ADD COLUMN for_kind TEXT;
+    `);
+    await convertBalanceFish();
+  }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+/**
+ * Before old balances existed, utang from before the app was entered as a
+ * fish called "Balance" (1 kg × the amount). Turn those into real old
+ * balances and drop the stand-in fish.
+ */
+async function convertBalanceFish() {
+  const fakes = await db.getAllAsync<{ id: number }>(
+    `SELECT id FROM fish WHERE LOWER(TRIM(name)) IN ('balance', 'old balance', 'utang', 'previous balance')`,
+  );
+  for (const { id: fishId } of fakes) {
+    for (const [table, personCol, entryKind] of [
+      ['sales', 'customer_id', 'sale'],
+      ['purchases', 'supplier_id', 'purchase'],
+    ] as const) {
+      const rows = await db.getAllAsync<{ id: number; date: string; person: number | null; total: number; paid: number; note: string; created_at: string }>(
+        `SELECT id, date, ${personCol} AS person, total, paid, note, created_at FROM ${table} WHERE fish_id = ?`,
+        [fishId],
+      );
+      for (const r of rows) {
+        if (r.person === null) continue;
+        const res = await db.runAsync(
+          `INSERT INTO balances (date, person_id, amount, kind, note, created_at) VALUES (?, ?, ?, 'old', ?, ?)`,
+          [r.date, r.person, r.total, r.note, r.created_at],
+        );
+        if (r.paid > 0) {
+          await db.runAsync(
+            `INSERT INTO payments (date, person_id, amount, note, created_at, for_entry, for_kind) VALUES (?, ?, ?, ?, ?, ?, 'balance')`,
+            [r.date, r.person, r.paid, 'Paid at the time', r.created_at, res.lastInsertRowId],
+          );
+        }
+        await db.runAsync(
+          `UPDATE payments SET for_entry = ?, for_kind = 'balance' WHERE for_entry = ? AND person_id = ? AND (for_kind IS NULL OR for_kind = ?)`,
+          [res.lastInsertRowId, r.id, r.person, entryKind],
+        );
+        await db.runAsync(`DELETE FROM ${table} WHERE id = ?`, [r.id]);
+      }
+    }
+    const left = await db.getFirstAsync<{ n: number }>(
+      `SELECT (SELECT COUNT(*) FROM sales WHERE fish_id = ?) + (SELECT COUNT(*) FROM purchases WHERE fish_id = ?)
+         + (SELECT COUNT(*) FROM spoilage WHERE fish_id = ?) AS n`,
+      [fishId, fishId, fishId],
+    );
+    if (!left?.n) await db.runAsync('DELETE FROM fish WHERE id = ?', [fishId]);
+  }
 }
 
 /* ───────────────────────── settings ───────────────────────── */
@@ -183,7 +248,10 @@ export async function listFish(includeArchived = false): Promise<FishWithStock[]
          - COALESCE((SELECT SUM(kg) FROM spoilage WHERE fish_id = f.id), 0) AS stock
      FROM fish f
      WHERE (? OR f.archived = 0)
-     ORDER BY f.archived, f.name COLLATE NOCASE`,
+     ORDER BY f.archived,
+       (SELECT COUNT(*) FROM sales WHERE fish_id = f.id AND date >= date('now', '-60 days'))
+         + (SELECT COUNT(*) FROM purchases WHERE fish_id = f.id AND date >= date('now', '-60 days')) DESC,
+       f.name COLLATE NOCASE`,
     [includeArchived ? 1 : 0],
   );
 }
@@ -204,6 +272,50 @@ export async function saveFish(f: { id?: number; name: string; sell_price: numbe
     ]);
   }
   changed();
+}
+
+/** Add a fish by name only; prices are filled in on the first sale. Returns its id. */
+export async function addFishByName(name: string): Promise<number> {
+  const existing = await db.getFirstAsync<{ id: number }>('SELECT id FROM fish WHERE LOWER(name) = LOWER(?)', [name]);
+  if (existing) {
+    await db.runAsync('UPDATE fish SET archived = 0 WHERE id = ?', [existing.id]);
+    changed();
+    return existing.id;
+  }
+  const res = await db.runAsync('INSERT INTO fish (name, created_at) VALUES (?, ?)', [name, nowStamp()]);
+  changed();
+  return res.lastInsertRowId;
+}
+
+async function fishRecordCount(id: number): Promise<number> {
+  const r = await db.getFirstAsync<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM sales WHERE fish_id = $f) + (SELECT COUNT(*) FROM purchases WHERE fish_id = $f)
+       + (SELECT COUNT(*) FROM spoilage WHERE fish_id = $f) AS n`,
+    { $f: id },
+  );
+  return r?.n ?? 0;
+}
+
+/** Delete a fish for good if it has no records; otherwise hide it so old records stay right. */
+export async function removeFish(id: number): Promise<'deleted' | 'hidden'> {
+  if ((await fishRecordCount(id)) === 0) {
+    await db.runAsync('DELETE FROM fish WHERE id = ?', [id]);
+    changed();
+    return 'deleted';
+  }
+  await db.runAsync('UPDATE fish SET archived = 1 WHERE id = ?', [id]);
+  changed();
+  return 'hidden';
+}
+
+/** Delete every fish that was never used. Returns how many went. */
+export async function removeUnusedFish(): Promise<number> {
+  const res = await db.runAsync(
+    `DELETE FROM fish WHERE id NOT IN (SELECT fish_id FROM sales) AND id NOT IN (SELECT fish_id FROM purchases)
+       AND id NOT IN (SELECT fish_id FROM spoilage)`,
+  );
+  changed();
+  return res.changes;
 }
 
 export async function setFishArchived(id: number, archived: boolean) {
@@ -277,17 +389,20 @@ export type PersonSummary = Person & {
 const PERSON_SUMMARY = `
   SELECT p.*,
     COALESCE((SELECT SUM(total - paid) FROM sales WHERE customer_id = p.id), 0)
-      + COALESCE((SELECT SUM(total - paid) FROM purchases WHERE supplier_id = p.id), 0) AS charged,
+      + COALESCE((SELECT SUM(total - paid) FROM purchases WHERE supplier_id = p.id), 0)
+      + COALESCE((SELECT SUM(amount) FROM balances WHERE person_id = p.id), 0) AS charged,
     COALESCE((SELECT SUM(amount) FROM payments WHERE person_id = p.id), 0) AS paid,
     (SELECT MIN(d) FROM (
        SELECT MIN(date) AS d FROM sales WHERE customer_id = p.id AND total > paid
-       UNION ALL SELECT MIN(date) FROM purchases WHERE supplier_id = p.id AND total > paid)) AS first_credit,
+       UNION ALL SELECT MIN(date) FROM purchases WHERE supplier_id = p.id AND total > paid
+       UNION ALL SELECT MIN(date) FROM balances WHERE person_id = p.id)) AS first_credit,
     (SELECT MIN(date) FROM payments WHERE person_id = p.id) AS first_payment,
     (SELECT MAX(date) FROM payments WHERE person_id = p.id) AS last_payment,
     (SELECT MAX(d) FROM (
        SELECT MAX(date) AS d FROM sales WHERE customer_id = p.id
        UNION ALL SELECT MAX(date) FROM purchases WHERE supplier_id = p.id
-       UNION ALL SELECT MAX(date) FROM payments WHERE person_id = p.id)) AS last_activity
+       UNION ALL SELECT MAX(date) FROM payments WHERE person_id = p.id
+       UNION ALL SELECT MAX(date) FROM balances WHERE person_id = p.id)) AS last_activity
   FROM people p`;
 
 function withBalance(rows: Omit<PersonSummary, 'balance'>[]): PersonSummary[] {
@@ -325,13 +440,16 @@ export async function deletePerson(id: number) {
     await db.runAsync('DELETE FROM sales WHERE customer_id = ?', [id]);
     await db.runAsync('DELETE FROM purchases WHERE supplier_id = ?', [id]);
     await db.runAsync('DELETE FROM payments WHERE person_id = ?', [id]);
+    await db.runAsync('DELETE FROM balances WHERE person_id = ?', [id]);
     await db.runAsync('DELETE FROM people WHERE id = ?', [id]);
   });
   changed();
 }
 
+export type LedgerKind = 'sale' | 'purchase' | 'balance' | 'payment';
+
 export type LedgerEntry = {
-  kind: 'sale' | 'purchase' | 'payment';
+  kind: LedgerKind;
   id: number;
   date: string;
   fish: string | null;
@@ -341,8 +459,12 @@ export type LedgerEntry = {
   paid: number;
   note: string;
   created_at: string;
-  /** Payments only: the sale/purchase this payment was marked against. */
+  /** Payments only: the entry this payment was marked against. */
   for_entry: number | null;
+  /** Which kind of entry `for_entry` points to (null on older payments: sale or purchase). */
+  for_kind: LedgerKind | null;
+  /** Balances only: 'old' (from before the app) or 'credit' (utang with no fish). */
+  balance_kind: 'old' | 'credit' | null;
 };
 
 /** Oldest first so a running balance can be drawn. */
@@ -350,16 +472,19 @@ export async function personLedger(id: number): Promise<LedgerEntry[]> {
   return db.getAllAsync<LedgerEntry>(
     `SELECT * FROM (
        SELECT 'sale' AS kind, s.id, s.date, f.name AS fish, s.kg, s.price, s.total, s.paid, s.note, s.created_at,
-              NULL AS for_entry
+              NULL AS for_entry, NULL AS for_kind, NULL AS balance_kind
          FROM sales s JOIN fish f ON f.id = s.fish_id WHERE s.customer_id = ?
        UNION ALL
-       SELECT 'purchase', u.id, u.date, f.name, u.kg, u.price, u.total, u.paid, u.note, u.created_at, NULL
+       SELECT 'purchase', u.id, u.date, f.name, u.kg, u.price, u.total, u.paid, u.note, u.created_at, NULL, NULL, NULL
          FROM purchases u JOIN fish f ON f.id = u.fish_id WHERE u.supplier_id = ?
        UNION ALL
-       SELECT 'payment', y.id, y.date, NULL, NULL, NULL, y.amount, y.amount, y.note, y.created_at, y.for_entry
+       SELECT 'balance', b.id, b.date, NULL, NULL, NULL, b.amount, 0, b.note, b.created_at, NULL, NULL, b.kind
+         FROM balances b WHERE b.person_id = ?
+       UNION ALL
+       SELECT 'payment', y.id, y.date, NULL, NULL, NULL, y.amount, y.amount, y.note, y.created_at, y.for_entry, y.for_kind, NULL
          FROM payments y WHERE y.person_id = ?
      ) ORDER BY date, created_at`,
-    [id, id, id],
+    [id, id, id, id],
   );
 }
 
@@ -389,10 +514,21 @@ export async function addPurchase(p: {
   changed();
 }
 
-export async function addPayment(p: { date: string; personId: number; amount: number; note?: string; forEntry?: number }) {
+export async function addPayment(p: {
+  date: string; personId: number; amount: number; note?: string; forEntry?: number; forKind?: LedgerKind;
+}) {
   await db.runAsync(
-    'INSERT INTO payments (date, person_id, amount, note, created_at, for_entry) VALUES (?, ?, ?, ?, ?, ?)',
-    [p.date, p.personId, p.amount, p.note ?? '', nowStamp(), p.forEntry ?? null],
+    'INSERT INTO payments (date, person_id, amount, note, created_at, for_entry, for_kind) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [p.date, p.personId, p.amount, p.note ?? '', nowStamp(), p.forEntry ?? null, p.forEntry ? (p.forKind ?? null) : null],
+  );
+  changed();
+}
+
+/** Utang with no fish: an old balance from before the app, or an amount-only utang. */
+export async function addBalance(b: { date: string; personId: number; amount: number; kind: 'old' | 'credit'; note?: string }) {
+  await db.runAsync(
+    'INSERT INTO balances (date, person_id, amount, kind, note, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [b.date, b.personId, b.amount, b.kind, b.note ?? '', nowStamp()],
   );
   changed();
 }
@@ -404,7 +540,10 @@ export async function addSpoilage(s: { date: string; fishId: number; kg: number;
   changed();
 }
 
-export type EntryTable = 'sales' | 'purchases' | 'payments' | 'spoilage' | 'expenses';
+export type EntryTable = 'sales' | 'purchases' | 'balances' | 'payments' | 'spoilage' | 'expenses';
+
+/** The ledger kind each person-linked table holds. */
+export const TABLE_KIND = { sales: 'sale', purchases: 'purchase', balances: 'balance', payments: 'payment' } as const;
 
 export type EntryDetail = {
   table: EntryTable;
@@ -428,6 +567,9 @@ export async function getEntry(table: EntryTable, id: number): Promise<EntryDeta
             FROM sales s JOIN fish f ON f.id = s.fish_id LEFT JOIN people p ON p.id = s.customer_id WHERE s.id = ?`,
     purchases: `SELECT u.date, f.name AS title, u.kg, u.price, u.total, u.paid, u.note, p.id AS person_id, p.name AS person, p.kind AS person_kind
             FROM purchases u JOIN fish f ON f.id = u.fish_id LEFT JOIN people p ON p.id = u.supplier_id WHERE u.id = ?`,
+    balances: `SELECT b.date, CASE b.kind WHEN 'old' THEN 'Old balance' ELSE 'Utang' END AS title, NULL AS kg, NULL AS price,
+            b.amount AS total, 0 AS paid, b.note, p.id AS person_id, p.name AS person, p.kind AS person_kind
+            FROM balances b JOIN people p ON p.id = b.person_id WHERE b.id = ?`,
     payments: `SELECT y.date, p.name AS title, NULL AS kg, NULL AS price, y.amount AS total, y.amount AS paid, y.note,
             p.id AS person_id, p.name AS person, p.kind AS person_kind FROM payments y JOIN people p ON p.id = y.person_id WHERE y.id = ?`,
     spoilage: `SELECT w.date, f.name AS title, w.kg, NULL AS price, 0 AS total, NULL AS paid, w.note, NULL AS person_id, NULL AS person,
@@ -441,15 +583,82 @@ export async function getEntry(table: EntryTable, id: number): Promise<EntryDeta
 
 export async function deleteEntry(table: EntryTable, id: number) {
   await db.runAsync(`DELETE FROM ${table} WHERE id = ?`, [id]);
-  if (table === 'sales' || table === 'purchases') {
-    // Its "mark as paid" payments stay as plain payments toward the balance.
-    const kind = table === 'sales' ? 'customer' : 'supplier';
+  // Its "mark as paid" payments stay, as plain payments toward the balance.
+  if (table === 'balances') {
+    await db.runAsync(`UPDATE payments SET for_entry = NULL, for_kind = NULL WHERE for_entry = ? AND for_kind = 'balance'`, [id]);
+  } else if (table === 'sales' || table === 'purchases') {
+    const personKind = table === 'sales' ? 'customer' : 'supplier';
     await db.runAsync(
-      `UPDATE payments SET for_entry = NULL WHERE for_entry = ? AND person_id IN (SELECT id FROM people WHERE kind = ?)`,
-      [id, kind],
+      `UPDATE payments SET for_entry = NULL, for_kind = NULL WHERE for_entry = ?
+         AND (for_kind = ? OR (for_kind IS NULL AND person_id IN (SELECT id FROM people WHERE kind = ?)))`,
+      [id, TABLE_KIND[table], personKind],
     );
   }
   changed();
+}
+
+export type EntryEdit = { date: string; note: string; kg?: number; price?: number; paid?: number; amount?: number; category?: string };
+
+/** Fix a record in place. Totals are recomputed from kilos × price. */
+export async function updateEntry(table: EntryTable, id: number, e: EntryEdit) {
+  switch (table) {
+    case 'sales':
+    case 'purchases': {
+      const total = Math.round((e.kg ?? 0) * (e.price ?? 0));
+      await db.runAsync(`UPDATE ${table} SET date = ?, kg = ?, price = ?, total = ?, paid = ?, note = ? WHERE id = ?`, [
+        e.date, e.kg ?? 0, e.price ?? 0, total, Math.min(e.paid ?? 0, total), e.note, id,
+      ]);
+      break;
+    }
+    case 'spoilage':
+      await db.runAsync('UPDATE spoilage SET date = ?, kg = ?, note = ? WHERE id = ?', [e.date, e.kg ?? 0, e.note, id]);
+      break;
+    case 'expenses':
+      await db.runAsync('UPDATE expenses SET date = ?, amount = ?, note = ?, category = COALESCE(?, category) WHERE id = ?', [
+        e.date, e.amount ?? 0, e.note, e.category ?? null, id,
+      ]);
+      break;
+    default:
+      await db.runAsync(`UPDATE ${table} SET date = ?, amount = ?, note = ? WHERE id = ?`, [e.date, e.amount ?? 0, e.note, id]);
+  }
+  changed();
+}
+
+/** Days in a month that have any record — for the dots on history calendars. */
+export async function activeDays(start: string, end: string, personId?: number, fishId?: number): Promise<Map<string, 'in' | 'out' | 'both'>> {
+  let rows: { date: string; flow: 'in' | 'out' }[];
+  if (personId) {
+    rows = await db.getAllAsync(
+      `SELECT date, 'out' AS flow FROM sales WHERE customer_id = $p AND date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM purchases WHERE supplier_id = $p AND date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM balances WHERE person_id = $p AND date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'in' FROM payments WHERE person_id = $p AND date BETWEEN $s AND $e`,
+      { $p: personId, $s: start, $e: end },
+    );
+  } else if (fishId) {
+    rows = await db.getAllAsync(
+      `SELECT date, 'in' AS flow FROM sales WHERE fish_id = $f AND date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM purchases WHERE fish_id = $f AND date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM spoilage WHERE fish_id = $f AND date BETWEEN $s AND $e`,
+      { $f: fishId, $s: start, $e: end },
+    );
+  } else {
+    rows = await db.getAllAsync(
+      `SELECT date, 'in' AS flow FROM sales WHERE date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'in' FROM payments WHERE date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM purchases WHERE date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM expenses WHERE date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM balances WHERE date BETWEEN $s AND $e
+       UNION ALL SELECT date, 'out' FROM spoilage WHERE date BETWEEN $s AND $e`,
+      { $s: start, $e: end },
+    );
+  }
+  const map = new Map<string, 'in' | 'out' | 'both'>();
+  for (const r of rows) {
+    const had = map.get(r.date);
+    map.set(r.date, had && had !== r.flow ? 'both' : r.flow);
+  }
+  return map;
 }
 
 /* ───────────────────────── expenses ───────────────────────── */
@@ -542,7 +751,9 @@ export async function daySummary(date: string): Promise<DaySummary> {
        (SELECT opening_cash FROM days WHERE date = $d) AS opening,
        (SELECT counted_cash FROM days WHERE date = $d) AS counted,
        (SELECT closed_at FROM days WHERE date = $d) AS closed_at,
-       COALESCE((SELECT SUM(total) FROM sales WHERE date = $d), 0) AS sales_total,
+       COALESCE((SELECT SUM(total) FROM sales WHERE date = $d), 0)
+         + COALESCE((SELECT SUM(b.amount) FROM balances b JOIN people p ON p.id = b.person_id
+                     WHERE b.date = $d AND b.kind = 'credit' AND p.kind = 'customer'), 0) AS sales_total,
        COALESCE((SELECT SUM(paid) FROM sales WHERE date = $d), 0) AS cash_sales,
        COALESCE((SELECT SUM(kg) FROM sales WHERE date = $d), 0) AS kg_sold,
        COALESCE((SELECT SUM(y.amount) FROM payments y JOIN people p ON p.id = y.person_id
@@ -600,6 +811,10 @@ export async function dayActivity(date: string): Promise<Activity[]> {
        SELECT 'purchases', u.id, f.name, NULL, p.name, u.kg, u.price, u.total, u.paid, u.note, u.created_at
          FROM purchases u JOIN fish f ON f.id = u.fish_id LEFT JOIN people p ON p.id = u.supplier_id WHERE u.date = $d
        UNION ALL
+       SELECT 'balances', b.id, CASE b.kind WHEN 'old' THEN 'Old balance' ELSE 'Utang' END, p.kind, p.name,
+              NULL, NULL, b.amount, 0, b.note, b.created_at
+         FROM balances b JOIN people p ON p.id = b.person_id WHERE b.date = $d
+       UNION ALL
        SELECT 'payments', y.id, p.name, p.kind, p.name, NULL, NULL, y.amount, y.amount, y.note, y.created_at
          FROM payments y JOIN people p ON p.id = y.person_id WHERE y.date = $d
        UNION ALL
@@ -625,6 +840,8 @@ export async function dayActivity(date: string): Promise<Activity[]> {
         return r.kind === 'customer'
           ? { ...base, title: `${r.title} paid`, detail: r.note || 'Utang payment', flow: 1 }
           : { ...base, title: `Paid ${r.title}`, detail: r.note || 'Supplier payment', flow: -1 };
+      case 'balances':
+        return { ...base, title: `${r.title} · ${r.person}`, detail: r.note || (r.kind === 'customer' ? 'Owes you' : 'You owe'), flow: 0 };
       case 'spoilage':
         return { ...base, title: `Spoiled ${r.title}`, detail: r.note || 'Not sellable', flow: 0 };
       default:
@@ -661,6 +878,8 @@ export async function fishAudit(date: string): Promise<FishDay[]> {
 
 export type Report = {
   revenue: number;
+  /** Amount-only utang (no fish recorded), already inside `revenue`. */
+  otherSales: number;
   cashIn: number;
   cost: number;
   spoilageCost: number;
@@ -688,8 +907,18 @@ export async function report(start: string, end: string): Promise<Report> {
     'SELECT fish_id, SUM(kg) AS kg FROM spoilage WHERE date BETWEEN ? AND ? GROUP BY fish_id',
     [start, end],
   );
+  // Amount-only utang to customers is a sale whose fish wasn't recorded.
   const daily = await db.getAllAsync<{ date: string; total: number }>(
-    'SELECT date, SUM(total) AS total FROM sales WHERE date BETWEEN ? AND ? GROUP BY date ORDER BY date',
+    `SELECT date, SUM(total) AS total FROM (
+       SELECT date, total FROM sales WHERE date BETWEEN $s AND $e
+       UNION ALL SELECT b.date, b.amount FROM balances b JOIN people p ON p.id = b.person_id
+         WHERE b.kind = 'credit' AND p.kind = 'customer' AND b.date BETWEEN $s AND $e
+     ) GROUP BY date ORDER BY date`,
+    { $s: start, $e: end },
+  );
+  const other = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(b.amount), 0) AS total FROM balances b JOIN people p ON p.id = b.person_id
+     WHERE b.kind = 'credit' AND p.kind = 'customer' AND b.date BETWEEN ? AND ?`,
     [start, end],
   );
   const expenseByCategory = await db.getAllAsync<{ category: string; amount: number }>(
@@ -699,21 +928,25 @@ export async function report(start: string, end: string): Promise<Report> {
   const balances = await db.getFirstAsync<{ receivable: number; payable: number; loans_left: number; collected: number }>(
     `SELECT
        COALESCE((SELECT SUM(total - paid) FROM sales), 0)
+         + COALESCE((SELECT SUM(b.amount) FROM balances b JOIN people p ON p.id = b.person_id WHERE p.kind = 'customer'), 0)
          - COALESCE((SELECT SUM(y.amount) FROM payments y JOIN people p ON p.id = y.person_id WHERE p.kind = 'customer'), 0) AS receivable,
        COALESCE((SELECT SUM(total - paid) FROM purchases), 0)
+         + COALESCE((SELECT SUM(b.amount) FROM balances b JOIN people p ON p.id = b.person_id WHERE p.kind = 'supplier'), 0)
          - COALESCE((SELECT SUM(y.amount) FROM payments y JOIN people p ON p.id = y.person_id WHERE p.kind = 'supplier'), 0) AS payable,
        COALESCE((SELECT SUM(amount) FROM loan_dues WHERE paid_date IS NULL), 0) AS loans_left,
        COALESCE((SELECT SUM(y.amount) FROM payments y JOIN people p ON p.id = y.person_id
                  WHERE p.kind = 'customer' AND y.date BETWEEN ? AND ?), 0) AS collected`,
     [start, end],
   );
-  const revenue = perFish.reduce((a, f) => a + f.total, 0);
+  const otherSales = other?.total ?? 0;
+  const revenue = perFish.reduce((a, f) => a + f.total, 0) + otherSales;
   const cost = Math.round(perFish.reduce((a, f) => a + f.kg * (costs.get(f.id) ?? 0), 0));
   const spoilageCost = Math.round(spoiled.reduce((a, s) => a + s.kg * (costs.get(s.fish_id) ?? 0), 0));
   const expenses = expenseByCategory.reduce((a, e) => a + e.amount, 0);
   const gross = revenue - cost;
   return {
     revenue,
+    otherSales,
     cashIn: perFish.reduce((a, f) => a + f.paid, 0) + (balances?.collected ?? 0),
     cost,
     spoilageCost,
@@ -794,7 +1027,8 @@ export function splitInstallments(total: number, n: number): number[] {
   return Array.from({ length: n }, (_, i) => (i === n - 1 ? total - base * (n - 1) : base));
 }
 
-export async function addLoan(l: Omit<Loan, 'id'>): Promise<number> {
+/** `alreadyPaid` marks the first installments as paid on their due dates (for loans started before the app). */
+export async function addLoan(l: Omit<Loan, 'id'>, alreadyPaid = 0): Promise<number> {
   let id = 0;
   await db.withTransactionAsync(async () => {
     const res = await db.runAsync(
@@ -805,8 +1039,9 @@ export async function addLoan(l: Omit<Loan, 'id'>): Promise<number> {
     const dates = dueDates(l.first_due, l.installments, l.frequency);
     const amounts = splitInstallments(l.total_payable, l.installments);
     for (let i = 0; i < dates.length; i++) {
-      await db.runAsync('INSERT INTO loan_dues (loan_id, seq, due_date, amount) VALUES (?, ?, ?, ?)', [
-        id, i + 1, dates[i], amounts[i],
+      const paid = i < alreadyPaid ? (dates[i] < today() ? dates[i] : today()) : null;
+      await db.runAsync('INSERT INTO loan_dues (loan_id, seq, due_date, amount, paid_date) VALUES (?, ?, ?, ?, ?)', [
+        id, i + 1, dates[i], amounts[i], paid,
       ]);
     }
   });
@@ -856,7 +1091,7 @@ export async function upcomingDues(days = 3): Promise<(LoanDue & { lender: strin
 /* ───────────────────────── backup ───────────────────────── */
 
 const TABLES = [
-  'settings', 'fish', 'people', 'days', 'sales', 'purchases', 'payments', 'spoilage', 'expenses', 'loans', 'loan_dues',
+  'settings', 'fish', 'people', 'balances', 'days', 'sales', 'purchases', 'payments', 'spoilage', 'expenses', 'loans', 'loan_dues',
 ] as const;
 
 export type Backup = { app: 'fish-ledger'; version: number; exported_at: string; tables: Record<string, unknown[]> };

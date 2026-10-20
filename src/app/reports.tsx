@@ -36,6 +36,7 @@ function Body({ r, period, start, end }: { r: Report; period: Period; start: str
 
       <Card style={{ marginTop: space.md }}>
         <LedgerLine label="Sales" value={peso(r.revenue)} />
+        {r.otherSales ? <LedgerLine label="  incl. utang with no fish" value={peso(r.otherSales)} /> : null}
         <LedgerLine label="− Cost of fish sold" value={peso(r.cost)} />
         <Divider style={{ marginVertical: 6 }} />
         <LedgerLine bold label="Gain on fish" value={peso(r.gross)} />

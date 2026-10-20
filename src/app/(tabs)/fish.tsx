@@ -1,13 +1,24 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { Card, DateStepper, Empty, IconButton, PageHeader, Screen, Section, T } from '../../components/ui';
+import { Button, Card, confirm, DateStepper, Empty, IconButton, PageHeader, Screen, Section, T, toast } from '../../components/ui';
 import { Icon } from '../../components/icons';
-import { fishAudit, listFish, type FishDay } from '../../lib/db';
+import { fishAudit, listFish, removeUnusedFish, type FishDay } from '../../lib/db';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
 import { today } from '../../lib/dates';
 import { color, font, space } from '../../lib/theme';
+
+async function removeUnused() {
+  const ok = await confirm(
+    'Remove unused fish?',
+    'Fish with no sales, stock or spoilage will be deleted from the list. You can add them again any time.',
+    'Remove',
+  );
+  if (!ok) return;
+  const n = await removeUnusedFish();
+  toast(n === 1 ? '1 fish removed' : `${n} fish removed`);
+}
 
 export default function FishScreen() {
   const [date, setDate] = useState(today());
@@ -24,7 +35,7 @@ export default function FishScreen() {
         title="Fish audit"
         right={<IconButton icon="plus" tone="sea" label="New fish" onPress={() => router.push('/fish/edit')} />}
       />
-      <DateStepper value={date} onChange={setDate} />
+      <DateStepper value={date} onChange={setDate} marks={{ all: true }} />
 
       <Section
         title="Movement for the day"
@@ -74,6 +85,16 @@ export default function FishScreen() {
           })}
         </Card>
         <T v="caption" style={{ marginTop: 8 }}>Prices are per kilo. They update to the last price you used.</T>
+        {fish && fish.some((f) => f.bought === 0 && f.sold === 0 && f.spoiled === 0) ? (
+          <Button
+            small
+            kind="ghost"
+            icon="trash"
+            label="Remove fish you never used"
+            onPress={removeUnused}
+            style={{ marginTop: space.md, alignSelf: 'flex-start' }}
+          />
+        ) : null}
       </Section>
     </Screen>
   );

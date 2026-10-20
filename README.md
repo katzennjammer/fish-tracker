@@ -13,6 +13,13 @@ account and no internet: everything is stored in a SQLite file on the device.
 | **Expenses** | Daily / weekly / monthly totals by category (ice, transport, bags, rent…). |
 | **More** | **Online loans** (GLoan, SLoan, Tala, Home Credit…) with a payment schedule and phone reminders the day before and on each due date. **Profit** report: sales − cost of fish − spoilage − expenses, best sellers, sales per day. **Settings**: names, PIN lock, 6 AM morning paalala, backup/restore. |
 
+**Old balances** (utang from before the app) can be added for customers and
+suppliers — on a person's page, when adding a new person, or as *Utang amount
+only* on the sell/buy form when the fish isn't known. Every date field opens a
+calendar, and each history (person, fish, Today, expenses) has a month calendar
+with dots on days that have records. **Send balance** makes a picture
+statement with Yuki to share by Messenger.
+
 Tap any record to open it: **Mark as paid** or **Delete record**. Payments
 settle the oldest utang first, so each utang shows *PAID ✓ date*, *₱x left* or
 *UNPAID* by itself; a person page also has **Paid in full**.

@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, Card, confirm, Empty, LedgerLine, openEntry, PageHeader, Screen, Section, T, Tag } from '../../components/ui';
-import { fishHistory, getFish, setFishArchived, type FishMovement } from '../../lib/db';
+import { Button, Card, confirm, Empty, LedgerLine, openEntry, PageHeader, Screen, Section, T, Tag, done } from '../../components/ui';
+import { fishHistory, getFish, removeFish, setFishArchived, type FishMovement } from '../../lib/db';
+import { HistoryCalendar } from '../../components/Calendar';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
 import { short } from '../../lib/dates';
@@ -11,27 +13,46 @@ export default function FishDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const fishId = Number(id);
   const fish = useQuery(() => getFish(fishId), [fishId]);
-  const history = useQuery(() => fishHistory(fishId), [fishId]);
+  const history = useQuery(() => fishHistory(fishId, 1000), [fishId]);
+  const [day, setDay] = useState<string | null>(null);
 
   if (!fish) return <Screen><PageHeader back title={fish === null ? 'Not found' : ''} /></Screen>;
 
   const gain = fish.sell_price && fish.buy_price ? fish.sell_price - fish.buy_price : null;
 
-  async function toggleArchive() {
+  const used = (history?.length ?? 0) > 0;
+  const shown = day ? history?.filter((m) => m.date === day) : history?.slice(0, 30);
+
+  async function remove() {
     if (!fish) return;
-    if (!fish.archived) {
-      const ok = await confirm(`Hide ${fish.name}?`, 'It will no longer show when selling. Past records stay.', 'Hide');
-      if (!ok) return;
+    if (fish.archived) {
+      await setFishArchived(fish.id, false);
+      return;
     }
-    await setFishArchived(fish.id, !fish.archived);
-    if (!fish.archived) router.back();
+    const ok = await confirm(
+      `Remove ${fish.name}?`,
+      used
+        ? 'It has records, so it will be hidden from the fish list. Its past records stay in the reports.'
+        : 'It has no records, so it will be deleted.',
+      used ? 'Hide fish' : 'Delete fish',
+    );
+    if (!ok) return;
+    const result = await removeFish(fish.id);
+    router.back();
+    done(result === 'deleted' ? `${fish.name} deleted` : `${fish.name} hidden`);
   }
 
   return (
     <Screen
       footer={
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Button label={fish.archived ? 'Show again' : 'Hide fish'} kind="ghost" onPress={toggleArchive} style={{ flex: 1 }} />
+          <Button
+            label={fish.archived ? 'Show again' : used ? 'Hide fish' : 'Delete fish'}
+            kind={fish.archived ? 'ghost' : 'danger'}
+            icon={fish.archived ? undefined : 'trash'}
+            onPress={remove}
+            style={{ flex: 1 }}
+          />
           <Button
             label="Edit prices"
             icon="edit"
@@ -56,13 +77,21 @@ export default function FishDetailScreen() {
         </Card>
       ) : null}
 
-      <Section title="Recent movement" right={history?.length ? <T v="caption">Tap to open</T> : null}>
+      <Section title="History" right={used ? <T v="caption">Tap a day to see it</T> : null}>
         {history && history.length === 0 ? (
           <Card><Empty icon="fish" title="No records yet" body="Sales, purchases and spoilage of this fish appear here." /></Card>
         ) : (
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
-            {history?.map((m, i) => <Move key={`${m.kind}-${m.id}`} m={m} last={i === history.length - 1} />)}
-          </Card>
+          <>
+            <HistoryCalendar source={{ fishId: fish.id }} day={day} onDay={setDay} />
+            <T v="label" style={{ marginTop: space.lg, marginBottom: 8 }}>{day ? short(day, true) : 'Latest records'}</T>
+            {shown && shown.length === 0 ? (
+              <Card><Empty icon="today" title="Nothing on this day" body="Pick a day with a dot." /></Card>
+            ) : (
+              <Card style={{ padding: 0, overflow: 'hidden' }}>
+                {shown?.map((m, i) => <Move key={`${m.kind}-${m.id}`} m={m} last={i === shown.length - 1} />)}
+              </Card>
+            )}
+          </>
         )}
       </Section>
     </Screen>

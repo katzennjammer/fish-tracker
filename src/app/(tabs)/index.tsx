@@ -61,7 +61,7 @@ export default function TodayScreen() {
       </View>
       <PaalalaCard />
       <View style={{ height: space.lg }} />
-      <DateStepper value={date} onChange={setDate} />
+      <DateStepper value={date} onChange={setDate} marks={{ all: true }} />
 
       {dues && dues.length > 0 && isToday ? (
         <Card onPress={() => router.push('/loans')} style={styles.dueBanner}>

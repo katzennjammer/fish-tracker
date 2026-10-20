@@ -1,8 +1,8 @@
 import { View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, confirm, LedgerLine, Screen, SheetHeader, T, Tag, done } from '../components/ui';
-import { addPayment, deleteEntry, getEntry, personLedger, type EntryDetail, type EntryTable } from '../lib/db';
-import { settle, type Settlement } from '../lib/settle';
+import { addPayment, deleteEntry, getEntry, personLedger, TABLE_KIND, type EntryDetail, type EntryTable } from '../lib/db';
+import { entryKey, settle, type Settlement } from '../lib/settle';
 import { useQuery } from '../lib/useQuery';
 import { kg, peso } from '../lib/format';
 import { short, today } from '../lib/dates';
@@ -11,6 +11,7 @@ import { color, space } from '../lib/theme';
 const TITLES: Record<EntryTable, string> = {
   sales: 'Sale',
   purchases: 'Stock bought',
+  balances: 'Utang',
   payments: 'Payment',
   spoilage: 'Spoiled fish',
   expenses: 'Expense',
@@ -25,8 +26,8 @@ export default function EntryScreen() {
     const entry = await getEntry(table, id);
     if (!entry) return null;
     let settlement: Settlement | null = null;
-    if ((table === 'sales' || table === 'purchases') && entry.person_id) {
-      settlement = settle(await personLedger(entry.person_id)).get(id) ?? null;
+    if ((table === 'sales' || table === 'purchases' || table === 'balances') && entry.person_id) {
+      settlement = settle(await personLedger(entry.person_id)).get(entryKey(TABLE_KIND[table], id)) ?? null;
     }
     return { entry, settlement };
   }, [table, id]);
@@ -41,7 +42,9 @@ export default function EntryScreen() {
   if (!data) return <Screen><View /></Screen>;
   const { entry: e, settlement } = data;
   const isTrade = table === 'sales' || table === 'purchases';
+  const isOwed = isTrade || table === 'balances';
   const left = settlement?.left ?? 0;
+  const heading = table === 'balances' ? e.title : TITLES[table];
 
   async function markPaid() {
     if (!e.person_id || left <= 0) return;
@@ -57,13 +60,14 @@ export default function EntryScreen() {
       personId: e.person_id,
       amount: left,
       forEntry: e.id,
+      forKind: table === 'balances' ? 'balance' : table === 'sales' ? 'sale' : 'purchase',
       note: `For ${e.title} ${short(e.date)}`,
     });
     done('Marked as paid');
   }
 
   async function remove() {
-    const ok = await confirm('Delete this record?', `${TITLES[table]} — ${describe(e)}. This cannot be undone.`);
+    const ok = await confirm('Delete this record?', `${heading} — ${describe(e)}. This cannot be undone.`);
     if (!ok) return;
     await deleteEntry(table, id);
     done('Deleted');
@@ -73,14 +77,23 @@ export default function EntryScreen() {
     <Screen
       footer={
         <View style={{ gap: 10 }}>
-          {isTrade && left > 0 ? <Button label={`Mark as paid · ${peso(left)}`} icon="check" onPress={markPaid} /> : null}
-          <Button label="Delete record" kind="danger" icon="trash" onPress={remove} small={isTrade && left > 0} />
+          {isOwed && left > 0 ? <Button label={`Mark as paid · ${peso(left)}`} icon="check" onPress={markPaid} /> : null}
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Button
+              label="Edit"
+              kind="secondary"
+              icon="edit"
+              onPress={() => router.push({ pathname: '/edit-entry', params: { table, id: String(id) } })}
+              style={{ flex: 1 }}
+            />
+            <Button label="Delete" kind="danger" icon="trash" onPress={remove} style={{ flex: 1 }} />
+          </View>
         </View>
       }
     >
-      <SheetHeader title={TITLES[table]} subtitle={short(e.date, true)} />
+      <SheetHeader title={heading} subtitle={short(e.date, true)} />
 
-      {isTrade && settlement ? (
+      {isOwed && settlement ? (
         <View style={{ marginBottom: space.md }}>
           {settlement.owed <= 0 ? (
             <Tag label="PAID IN FULL" tone="green" />
@@ -106,7 +119,7 @@ export default function EntryScreen() {
         {e.price !== null ? <LedgerLine label="Price per kg" value={peso(e.price)} /> : null}
         {table !== 'spoilage' ? <LedgerLine bold label={isTrade ? 'Total' : 'Amount'} value={peso(e.total)} /> : null}
         {isTrade && e.paid !== null ? <LedgerLine label="Paid at the time" value={peso(e.paid)} /> : null}
-        {isTrade && settlement && settlement.owed > 0 ? (
+        {isOwed && settlement && settlement.owed > 0 ? (
           <LedgerLine
             bold
             label="Still unpaid"

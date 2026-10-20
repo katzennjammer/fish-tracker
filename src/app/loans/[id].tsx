@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, Card, confirm, LedgerLine, PageHeader, Screen, Section, T } from '../../components/ui';
+import { Button, Card, confirm, LedgerLine, PageHeader, Screen, Section, T, toast } from '../../components/ui';
 import { Icon } from '../../components/icons';
+import { CalendarSheet } from '../../components/Calendar';
 import { deleteLoan, getLoan, setDuePaid, type LoanDue } from '../../lib/db';
 import { syncReminders } from '../../lib/notify';
 import { useQuery } from '../../lib/useQuery';
@@ -13,18 +15,23 @@ export default function LoanScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const loanId = Number(id);
   const data = useQuery(() => getLoan(loanId), [loanId]);
+  const [picking, setPicking] = useState<LoanDue | null>(null);
 
   if (!data) return <Screen><PageHeader back title={data === null ? 'Not found' : ''} /></Screen>;
   const { loan, dues } = data;
   const left = loan.total_payable - loan.paid_amount;
 
-  async function toggle(d: LoanDue) {
-    if (d.paid_date) {
-      if (!(await confirm('Mark as unpaid?', `Installment ${d.seq} — ${peso(d.amount)}`, 'Mark unpaid'))) return;
-      await setDuePaid(d.id, null);
-    } else {
-      await setDuePaid(d.id, today());
-    }
+  /** Tap: pick the day it was paid (or change it). Hold: undo. */
+  async function markPaidOn(d: LoanDue, date: string) {
+    await setDuePaid(d.id, date);
+    toast(`Installment ${d.seq} paid on ${short(date)}`);
+    syncReminders().catch(() => {});
+  }
+
+  async function unpay(d: LoanDue) {
+    if (!d.paid_date) return;
+    if (!(await confirm('Mark as unpaid?', `Installment ${d.seq} — ${peso(d.amount)}`, 'Mark unpaid', 'primary'))) return;
+    await setDuePaid(d.id, null);
     syncReminders().catch(() => {});
   }
 
@@ -47,7 +54,7 @@ export default function LoanScreen() {
         {loan.note ? <T v="caption" style={{ marginTop: 8 }}>{loan.note}</T> : null}
       </Card>
 
-      <Section title="Payment schedule" right={<T v="caption">Tap to mark paid</T>}>
+      <Section title="Payment schedule" right={<T v="caption">Tap: day paid · Hold: undo</T>}>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           {dues.map((d, i) => {
             const late = !d.paid_date && d.due_date < today();
@@ -55,7 +62,8 @@ export default function LoanScreen() {
             return (
               <Pressable
                 key={d.id}
-                onPress={() => toggle(d)}
+                onPress={() => setPicking(d)}
+                onLongPress={() => unpay(d)}
                 style={({ pressed }) => [styles.row, i < dues.length - 1 && styles.line, pressed && { backgroundColor: color.sunk }]}
               >
                 <View style={[styles.box, d.paid_date ? styles.boxOn : late ? { borderColor: color.red } : null]}>
@@ -81,6 +89,12 @@ export default function LoanScreen() {
           })}
         </Card>
       </Section>
+      <CalendarSheet
+        visible={!!picking}
+        value={picking?.paid_date ?? today()}
+        onPick={(date) => picking && markPaidOn(picking, date)}
+        onClose={() => setPicking(null)}
+      />
     </Screen>
   );
 }

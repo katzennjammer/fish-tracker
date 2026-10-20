@@ -22,6 +22,7 @@ import { addDays, relativeDay, short, today } from '../lib/dates';
 import type { EntryTable } from '../lib/db';
 import { toast } from '../lib/dialog';
 import { Icon, type IconName } from './icons';
+import { CalendarSheet, type MarkSource } from './Calendar';
 
 /* ───────────── text ───────────── */
 
@@ -346,8 +347,14 @@ export function Empty({ icon, title, body, action }: { icon: IconName; title: st
   );
 }
 
-/** ‹  Today, Oct 19  › — dates move a day at a time; tapping the label returns to today. */
-export function DateStepper({ value, onChange, max = today() }: { value: string; onChange: (d: string) => void; max?: string }) {
+/**
+ * ‹  Today · Oct 19  ›  — arrows move a day; tapping the date opens a calendar
+ * so an old date is one tap away. `marks` adds dots for days with records.
+ */
+export function DateStepper({
+  value, onChange, max = today(), marks,
+}: { value: string; onChange: (d: string) => void; max?: string; marks?: MarkSource }) {
+  const [open, setOpen] = useState(false);
   const rel = relativeDay(value);
   const atMax = value >= max;
   return (
@@ -355,12 +362,14 @@ export function DateStepper({ value, onChange, max = today() }: { value: string;
       <Pressable onPress={() => onChange(addDays(value, -1))} hitSlop={10} style={styles.stepBtn}>
         <Icon name="chevronLeft" size={20} />
       </Pressable>
-      <Pressable onPress={() => onChange(today())} style={{ flex: 1, alignItems: 'center' }}>
+      <Pressable onPress={() => setOpen(true)} style={styles.stepLabel}>
+        <Icon name="today" size={17} color={color.sea} />
         <Text style={styles.stepText}>{rel ? `${rel} · ${short(value)}` : short(value, true)}</Text>
       </Pressable>
       <Pressable onPress={() => !atMax && onChange(addDays(value, 1))} hitSlop={10} style={[styles.stepBtn, atMax && { opacity: 0.25 }]}>
         <Icon name="chevronRight" size={20} />
       </Pressable>
+      <CalendarSheet visible={open} value={value} max={max} marks={marks} onPick={onChange} onClose={() => setOpen(false)} />
     </View>
   );
 }
@@ -376,7 +385,8 @@ export function openEntry(table: EntryTable, id: number) {
 export function done(message?: string) {
   if (message) toast(message);
   if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-  router.back();
+  if (router.canGoBack()) router.back();
+  else router.replace('/');
 }
 
 const styles = StyleSheet.create({
@@ -450,5 +460,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: color.line, paddingHorizontal: 6, height: 46,
   },
   stepBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  stepLabel: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: '100%' },
   stepText: { fontFamily: font.semibold, fontSize: 15, color: color.ink },
 });

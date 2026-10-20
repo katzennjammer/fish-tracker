@@ -1,4 +1,4 @@
-import type { LedgerEntry } from './db';
+import type { LedgerEntry, LedgerKind } from './db';
 
 // Works out which utang entries are already paid off. A payment marked
 // against an entry pays that entry first; everything else pays the oldest
@@ -14,9 +14,14 @@ export type Settlement = {
   settledOn: string | null;
 };
 
-export function settle(ledger: LedgerEntry[]): Map<number, Settlement> {
-  const open: { id: number; s: Settlement }[] = [];
-  const byId = new Map<number, Settlement>();
+/** Sales, purchases and balances share ids across tables, so key by kind too. */
+export function entryKey(kind: LedgerKind, id: number) {
+  return `${kind}-${id}`;
+}
+
+export function settle(ledger: LedgerEntry[]): Map<string, Settlement> {
+  const open: Settlement[] = [];
+  const byKey = new Map<string, Settlement>();
 
   function pay(s: Settlement, amount: number, date: string): number {
     const used = Math.min(s.left, amount);
@@ -30,17 +35,23 @@ export function settle(ledger: LedgerEntry[]): Map<number, Settlement> {
     if (e.kind !== 'payment') {
       const owed = e.total - e.paid;
       const s: Settlement = { owed, left: owed, settledOn: null };
-      byId.set(e.id, s);
-      if (owed > 0) open.push({ id: e.id, s });
+      byKey.set(entryKey(e.kind, e.id), s);
+      if (owed > 0) open.push(s);
       continue;
     }
     let amount = e.total;
-    const target = e.for_entry !== null ? byId.get(e.for_entry) : undefined;
-    if (target) amount = pay(target, amount, e.date);
-    for (const o of open) {
+    if (e.for_entry !== null) {
+      // Older payments did not record the kind; a person only has sales or purchases.
+      const target =
+        e.for_kind !== null
+          ? byKey.get(entryKey(e.for_kind, e.for_entry))
+          : byKey.get(entryKey('sale', e.for_entry)) ?? byKey.get(entryKey('purchase', e.for_entry));
+      if (target) amount = pay(target, amount, e.date);
+    }
+    for (const s of open) {
       if (amount <= 0) break;
-      amount = pay(o.s, amount, e.date);
+      amount = pay(s, amount, e.date);
     }
   }
-  return byId;
+  return byKey;
 }

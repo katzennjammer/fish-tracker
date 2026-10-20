@@ -1,32 +1,101 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { router } from 'expo-router';
 import { Chip, T } from './ui';
 import { Icon } from './icons';
-import { listFish, listPeople, savePerson, type FishWithStock, type PersonKind } from '../lib/db';
+import { addFishByName, getFish, listFish, listPeople, savePerson, type FishWithStock, type PersonKind } from '../lib/db';
 import { useQuery } from '../lib/useQuery';
 import { kg, peso } from '../lib/format';
 import { color, font } from '../lib/theme';
+
+/** How many fish to show before "More"; the most used come first. */
+const FISH_SHOWN = 8;
 
 export function FishPicker({
   value, onChange, priceOf,
 }: { value: number | null; onChange: (f: FishWithStock) => void; priceOf: 'sell_price' | 'buy_price' }) {
   const fish = useQuery(() => listFish(), []);
+  const [q, setQ] = useState('');
+  const [all, setAll] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
   if (!fish) return null;
+
+  const s = q.trim().toLowerCase();
+  const matches = s ? fish.filter((f) => f.name.toLowerCase().includes(s)) : fish;
+  let shown = all || s ? matches : matches.slice(0, FISH_SHOWN);
+  // Keep the picked fish visible even when it is past the first few.
+  const picked = fish.find((f) => f.id === value);
+  if (picked && !shown.includes(picked)) shown = [...shown, picked];
+  const hidden = matches.length - shown.length;
+
+  async function addNew(name: string) {
+    const clean = name.trim();
+    if (!clean) return;
+    const id = await addFishByName(clean);
+    const created = await getFish(id);
+    setAdding(false);
+    setNewName('');
+    setQ('');
+    if (created) onChange(created);
+  }
+
   return (
-    <View style={styles.wrap}>
-      {fish.map((f) => {
-        const price = f[priceOf];
-        const tracked = f.bought > 0;
-        const sub = [price ? `${peso(price)}/kg` : null, tracked ? `${kg(Math.max(f.stock, 0))} left` : null]
-          .filter(Boolean)
-          .join(' · ');
-        return <Chip key={f.id} label={f.name} sub={sub || 'set price'} on={value === f.id} onPress={() => onChange(f)} />;
-      })}
-      <Pressable onPress={() => router.push('/fish/edit')} style={styles.addChip}>
-        <Icon name="plus" size={18} color={color.inkSoft} />
-        <T v="caption" style={{ fontFamily: font.medium }}>New fish</T>
-      </Pressable>
+    <View>
+      {fish.length > FISH_SHOWN ? (
+        <View style={styles.fishSearch}>
+          <Icon name="search" size={17} color={color.inkSoft} />
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder="Find a fish"
+            placeholderTextColor={color.inkFaint}
+            style={styles.fishSearchInput}
+          />
+        </View>
+      ) : null}
+      <View style={styles.wrap}>
+        {shown.map((f) => {
+          const price = f[priceOf];
+          const tracked = f.bought > 0;
+          const sub = [price ? `${peso(price)}/kg` : null, tracked ? `${kg(Math.max(f.stock, 0))} left` : null]
+            .filter(Boolean)
+            .join(' · ');
+          return <Chip key={f.id} label={f.name} sub={sub || 'new'} on={value === f.id} onPress={() => onChange(f)} />;
+        })}
+        {hidden > 0 ? (
+          <Pressable onPress={() => setAll(true)} style={styles.addChip}>
+            <T v="caption" style={{ fontFamily: font.semibold }}>+{hidden} more</T>
+          </Pressable>
+        ) : null}
+        {s && matches.length === 0 ? (
+          <Pressable onPress={() => addNew(q)} style={[styles.addChip, { borderColor: color.green }]}>
+            <Icon name="plus" size={18} color={color.green} strokeWidth={2.2} />
+            <T v="caption" c={color.green} style={{ fontFamily: font.semibold }}>Add “{q.trim()}”</T>
+          </Pressable>
+        ) : adding ? (
+          <View style={[styles.addChip, styles.addOpen]}>
+            <TextInput
+              autoFocus
+              value={newName}
+              onChangeText={setNewName}
+              placeholder="Fish name"
+              placeholderTextColor={color.inkFaint}
+              autoCapitalize="words"
+              returnKeyType="done"
+              onSubmitEditing={() => addNew(newName)}
+              style={styles.addInput}
+            />
+            <Pressable onPress={() => addNew(newName)} hitSlop={8} style={styles.addGo}>
+              <Icon name="check" size={18} color={color.seaText} strokeWidth={2.4} />
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable onPress={() => setAdding(true)} style={styles.addChip}>
+            <Icon name="plus" size={18} color={color.inkSoft} />
+            <T v="caption" style={{ fontFamily: font.medium }}>New fish</T>
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 }
@@ -122,6 +191,14 @@ export function PersonPicker({
 
 const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  fishSearch: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, marginBottom: 10,
+    backgroundColor: color.card, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: color.line,
+  },
+  fishSearchInput: { flex: 1, fontFamily: font.medium, fontSize: 15.5, color: color.ink, paddingVertical: 10 },
+  addOpen: { borderStyle: 'solid', borderColor: color.sea, paddingRight: 6, minWidth: 190 },
+  addInput: { flex: 1, fontFamily: font.semibold, fontSize: 15.5, color: color.ink, paddingVertical: 8, minWidth: 110 },
+  addGo: { width: 34, height: 34, borderRadius: 10, backgroundColor: color.sea, alignItems: 'center', justifyContent: 'center' },
   addChip: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, minHeight: 50,
     borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: color.inkFaint,

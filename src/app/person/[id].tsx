@@ -1,9 +1,11 @@
-import { Linking, Pressable, Share, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, confirm, Empty, Money, openEntry, PageHeader, Screen, Section, T, Tag } from '../../components/ui';
 import { Icon } from '../../components/icons';
-import { addPayment, getPerson, getSetting, personLedger, type LedgerEntry, type PersonSummary } from '../../lib/db';
-import { settle, type Settlement } from '../../lib/settle';
+import { HistoryCalendar } from '../../components/Calendar';
+import { addPayment, getPerson, personLedger, type LedgerEntry, type PersonSummary } from '../../lib/db';
+import { entryKey, settle, type Settlement } from '../../lib/settle';
 import { useQuery } from '../../lib/useQuery';
 import { kg, peso } from '../../lib/format';
 import { ago, daysBetween, short, today } from '../../lib/dates';
@@ -14,6 +16,7 @@ export default function PersonScreen() {
   const personId = Number(id);
   const person = useQuery(() => getPerson(personId), [personId]);
   const ledger = useQuery(() => personLedger(personId), [personId]);
+  const [day, setDay] = useState<string | null>(null);
 
   if (person === null) {
     return (
@@ -27,7 +30,8 @@ export default function PersonScreen() {
   const isCustomer = person.kind === 'customer';
   const tone = person.balance > 0 ? (isCustomer ? color.red : color.brass) : color.green;
 
-  const rows = withRunningBalance(ledger);
+  const allRows = withRunningBalance(ledger);
+  const rows = day ? allRows.filter((r) => r.e.date === day) : allRows;
   const settled = settle(ledger);
 
   const openSince = openSinceDate(ledger);
@@ -96,11 +100,10 @@ export default function PersonScreen() {
           style={{ marginTop: space.md }}
         />
       ) : null}
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-        <Button small kind="secondary" icon="share" label="Send balance" onPress={() => shareStatement(person, ledger)} style={{ flex: 1 }} />
-        {person.phone ? (
-          <Button small kind="secondary" icon="phone" label="Call" onPress={() => Linking.openURL(`tel:${person.phone}`)} style={{ flex: 1 }} />
-        ) : null}
+      <View style={styles.tools}>
+        <Tool icon="plus" label="Old balance" onPress={() => router.push({ pathname: '/balance', params: { personId: String(person.id) } })} />
+        <Tool icon="share" label="Send balance" onPress={() => router.push({ pathname: '/statement', params: { id: String(person.id) } })} />
+        {person.phone ? <Tool icon="phone" label="Call" onPress={() => Linking.openURL(`tel:${person.phone}`)} /> : null}
       </View>
 
       <View style={styles.totals}>
@@ -108,22 +111,38 @@ export default function PersonScreen() {
         <Total label="Total paid" value={peso(person.paid)} />
       </View>
 
-      <Section title="History" right={rows.length ? <T v="caption">Tap to open</T> : null}>
-        {rows.length === 0 ? (
+      <Section title="History" right={allRows.length ? <T v="caption">Tap a day, or a record to open</T> : null}>
+        {allRows.length === 0 ? (
           <Card><Empty icon="receipt" title="No entries yet" body="Utang and payments for this person will show here." /></Card>
         ) : (
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
-            {rows.map(({ e, after }, i) => (
-              <Entry
-                key={`${e.kind}-${e.id}`}
-                e={e}
-                after={after}
-                last={i === rows.length - 1}
-                isCustomer={isCustomer}
-                settlement={settled.get(e.id)}
-              />
-            ))}
-          </Card>
+          <>
+            <HistoryCalendar source={{ personId: person.id }} day={day} onDay={setDay} />
+            <T v="label" style={{ marginTop: space.lg, marginBottom: 8 }}>
+              {day ? short(day, true) : 'All records'}
+            </T>
+            {rows.length === 0 ? (
+              <Card><Empty icon="today" title="Nothing on this day" body="Pick a day with a dot, or tap Show all." /></Card>
+            ) : (
+              <Card style={{ padding: 0, overflow: 'hidden' }}>
+                {rows.map(({ e, after }, i) => (
+                  <View key={`${e.kind}-${e.id}`}>
+                    {!day && (i === 0 || rows[i - 1].e.date !== e.date) ? (
+                      <View style={styles.dateHead}>
+                        <T v="caption" style={{ fontFamily: font.semibold }}>{short(e.date, true)}</T>
+                      </View>
+                    ) : null}
+                    <Entry
+                      e={e}
+                      after={after}
+                      last={i === rows.length - 1}
+                      isCustomer={isCustomer}
+                      settlement={settled.get(entryKey(e.kind, e.id))}
+                    />
+                  </View>
+                ))}
+              </Card>
+            )}
+          </>
         )}
       </Section>
       {person.note ? (
@@ -195,7 +214,8 @@ function Entry({
   e, after, last, isCustomer, settlement,
 }: { e: LedgerEntry; after: number; last: boolean; isCustomer: boolean; settlement?: Settlement }) {
   const isPay = e.kind === 'payment';
-  const table = e.kind === 'sale' ? 'sales' : e.kind === 'purchase' ? 'purchases' : 'payments';
+  const table = e.kind === 'sale' ? 'sales' : e.kind === 'purchase' ? 'purchases' : e.kind === 'balance' ? 'balances' : 'payments';
+  const title = isPay ? 'Payment' : e.kind === 'balance' ? (e.balance_kind === 'old' ? 'Old balance' : 'Utang') : e.fish;
   const open = () => openEntry(table, e.id);
 
   return (
@@ -203,7 +223,7 @@ function Entry({
       <View style={[styles.dot, { backgroundColor: isPay ? color.green : isCustomer ? color.red : color.brass }]} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <T v="strong" numberOfLines={1} style={{ flexShrink: 1 }}>{isPay ? 'Payment' : e.fish}</T>
+          <T v="strong" numberOfLines={1} style={{ flexShrink: 1 }}>{title}</T>
           {!isPay && settlement ? <StatusTag s={settlement} isCustomer={isCustomer} /> : null}
         </View>
         <T v="caption" numberOfLines={2}>
@@ -223,25 +243,25 @@ function Entry({
   );
 }
 
-async function shareStatement(p: PersonSummary, ledger: LedgerEntry[]) {
-  const stall = (await getSetting('stall_name')) || 'Analou Tracker';
-  const lines = ledger.slice(-12).map((e) =>
-    e.kind === 'payment'
-      ? `${short(e.date)}  Paid  −${peso(e.total)}`
-      : `${short(e.date)}  ${e.fish} ${kg(e.kg ?? 0)} × ${peso(e.price ?? 0)} = ${peso(e.total)}${e.paid ? ` (paid ${peso(e.paid)})` : ''}`,
+function Tool({ icon, label, onPress }: { icon: 'plus' | 'share' | 'phone'; label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.tool, pressed && { backgroundColor: color.sunk }]}>
+      <View style={styles.toolIcon}>
+        <Icon name={icon} size={19} color={color.sea} strokeWidth={2.1} />
+      </View>
+      <T v="caption" style={{ fontFamily: font.semibold, color: color.ink }}>{label}</T>
+    </Pressable>
   );
-  const message = [
-    `${stall}`,
-    `Statement for ${p.name} — ${short(today())}`,
-    '',
-    ...lines,
-    '',
-    p.balance > 0 ? `Remaining balance: ${peso(p.balance)}` : 'Fully paid. Salamat!',
-  ].join('\n');
-  await Share.share({ message });
 }
 
 const styles = StyleSheet.create({
+  tools: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  tool: {
+    flex: 1, alignItems: 'center', gap: 6, paddingVertical: 12, borderRadius: 16, backgroundColor: color.card,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: color.line,
+  },
+  toolIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: color.greenTint, alignItems: 'center', justifyContent: 'center' },
+  dateHead: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2, backgroundColor: color.sunk },
   edit: {
     width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     backgroundColor: color.card, borderWidth: StyleSheet.hairlineWidth, borderColor: color.line,

@@ -15,6 +15,7 @@ export default function NewLoanScreen() {
   const [principalText, setPrincipalText] = useState('');
   const [totalText, setTotalText] = useState('');
   const [countText, setCountText] = useState('');
+  const [paidText, setPaidText] = useState('');
   const [freq, setFreq] = useState<Frequency>('monthly');
   const [first, setFirst] = useState(addMonths(today(), 1));
   const [note, setNote] = useState('');
@@ -25,6 +26,7 @@ export default function NewLoanScreen() {
   const principal = toCents(parseAmount(principalText) ?? 0);
   const total = toCents(parseAmount(totalText) ?? 0);
   const count = Math.floor(parseAmount(countText) ?? 0);
+  const alreadyPaid = Math.min(Math.floor(parseAmount(paidText) ?? 0), count);
   const ok = !!name && principal > 0 && total > 0 && count >= 1 && count <= 120;
   const amounts = ok ? splitInstallments(total, count) : [];
   const dates = ok ? dueDates(first, count, freq) : [];
@@ -36,7 +38,7 @@ export default function NewLoanScreen() {
     try {
       await addLoan({
         lender: name, principal, total_payable: total, installments: count, frequency: freq, first_due: first, note: note.trim(),
-      });
+      }, alreadyPaid);
       syncReminders().catch(() => {});
       done('Loan saved — reminders are set');
     } finally {
@@ -98,6 +100,19 @@ export default function NewLoanScreen() {
 
       <T v="label" style={{ marginTop: space.xl, marginBottom: 10 }}>First due date</T>
       <DateStepper value={first} onChange={setFirst} max="9999-12-31" />
+      <T v="caption" style={{ marginTop: 6 }}>
+        Tap the date to pick from a calendar. For a loan you started before, pick its first due date even if it has passed.
+      </T>
+
+      <Field
+        label="Payments already made (optional)"
+        value={paidText}
+        onChangeText={setPaidText}
+        keyboardType="number-pad"
+        placeholder="0"
+        style={{ marginTop: space.xl }}
+        hint={alreadyPaid ? `The first ${alreadyPaid} will be marked paid on their due dates. You can change each date later.` : 'If you already paid some installments, how many?'}
+      />
 
       {ok ? (
         <Card style={{ marginTop: space.xl }}>

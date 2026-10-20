@@ -90,7 +90,7 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(tabs)" />
-          {['entry', 'sale', 'purchase', 'payment', 'expense', 'capital', 'close-day', 'spoilage', 'person/edit', 'fish/edit', 'loans/new', 'pin'].map(
+          {['entry', 'edit-entry', 'balance', 'statement', 'sale', 'purchase', 'payment', 'expense', 'capital', 'close-day', 'spoilage', 'person/edit', 'fish/edit', 'loans/new', 'pin'].map(
             (name) => (
               <Stack.Screen key={name} name={name} options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
             ),
