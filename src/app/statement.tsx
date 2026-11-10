@@ -4,7 +4,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
-import { Button, notice, Screen, SheetHeader } from '../components/ui';
+import { Button, notice, Screen, Segmented, SheetHeader } from '../components/ui';
 import { getPerson, getSetting, personLedger, type LedgerEntry, type PersonSummary } from '../lib/db';
 import { entryKey, settle } from '../lib/settle';
 import { useQuery } from '../lib/useQuery';
@@ -16,10 +16,18 @@ const YUKI = require('../../assets/icon.png');
 const CORAL = '#E07A5F';
 const ROWS = 8;
 
+/**
+ * What the statement covers. Opened from a day picked in the calendar it starts as that day alone;
+ * the other two add the balance still left, or go back to the whole account.
+ */
+type Scope = 'day' | 'dayBalance' | 'all';
+
 /** A colourful statement card, shared as a picture (or as text). */
 export default function StatementScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, day } = useLocalSearchParams<{ id: string; day?: string }>();
   const personId = Number(id);
+  const [picked, setScope] = useState<Scope>('day');
+  const scope: Scope = day ? picked : 'all';
   const data = useQuery(async () => {
     const [person, ledger, stall] = await Promise.all([getPerson(personId), personLedger(personId), getSetting('stall_name')]);
     return { person, ledger, stall: stall || 'Analou Tracker' };
@@ -35,7 +43,7 @@ export default function StatementScreen() {
     setBusy(true);
     try {
       const uri = await captureRef(card, { format: 'png', quality: 1, result: 'tmpfile' });
-      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `Balance for ${person!.name}` });
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `${scope === 'all' ? 'Balance' : short(day!)} for ${person!.name}` });
     } catch (e) {
       notice('Could not make the picture', e instanceof Error ? e.message : 'Try sending it as text.', 'error');
     } finally {
@@ -44,7 +52,7 @@ export default function StatementScreen() {
   }
 
   async function shareText() {
-    await Share.share({ message: statementText(person!, ledger, stall) });
+    await Share.share({ message: statementText(person!, ledger, stall, scope, day) });
   }
 
   return (
@@ -56,19 +64,48 @@ export default function StatementScreen() {
         </View>
       }
     >
-      <SheetHeader title="Send balance" subtitle="This picture can be sent by Messenger, Viber or SMS." />
+      <SheetHeader title={day ? 'Send this day' : 'Send balance'} subtitle="This picture can be sent by Messenger, Viber or SMS." />
+      {day ? (
+        <Segmented<Scope>
+          value={scope}
+          onChange={setScope}
+          options={[
+            { value: 'day', label: 'This day only' },
+            { value: 'dayBalance', label: 'Day + balance' },
+            { value: 'all', label: 'All records' },
+          ]}
+          style={{ marginBottom: 14 }}
+        />
+      ) : null}
       <View ref={card} collapsable={false} style={styles.card}>
-        <StatementCard person={person} ledger={ledger} stall={stall} />
+        <StatementCard person={person} ledger={ledger} stall={stall} scope={scope} day={day} />
       </View>
     </Screen>
   );
 }
 
-function StatementCard({ person, ledger, stall }: { person: PersonSummary; ledger: LedgerEntry[]; stall: string }) {
+/** What was added and what was paid on one day. */
+function dayTotals(entries: LedgerEntry[]) {
+  let added = 0;
+  let paid = 0;
+  for (const e of entries) {
+    if (e.kind === 'payment') paid += e.total;
+    else added += e.total - e.paid;
+  }
+  return { added, paid };
+}
+
+function StatementCard({
+  person, ledger, stall, scope, day,
+}: { person: PersonSummary; ledger: LedgerEntry[]; stall: string; scope: Scope; day?: string }) {
   const isCustomer = person.kind === 'customer';
   const settled = settle(ledger);
-  const recent = ledger.slice(-ROWS).reverse();
+  const oneDay = scope !== 'all' && !!day;
+  const shown = oneDay ? ledger.filter((e) => e.date === day).reverse() : ledger.slice(-ROWS).reverse();
+  const { added, paid } = dayTotals(oneDay ? shown : []);
   const owes = person.balance > 0;
+  const showBalance = scope !== 'day';
+  const dayLabel = day ? short(day, true) : '';
 
   return (
     <>
@@ -76,7 +113,7 @@ function StatementCard({ person, ledger, stall }: { person: PersonSummary; ledge
         <Image source={YUKI} style={styles.yuki} contentFit="cover" />
         <View style={{ flex: 1 }}>
           <Text style={styles.stall} numberOfLines={1}>{stall}</Text>
-          <Text style={styles.sub}>Statement · {short(today(), true)}</Text>
+          <Text style={styles.sub}>Statement · {short(oneDay ? day! : today(), true)}</Text>
         </View>
       </View>
       <View style={styles.wave}>
@@ -87,24 +124,54 @@ function StatementCard({ person, ledger, stall }: { person: PersonSummary; ledge
         <Text style={styles.for}>{isCustomer ? 'For' : 'From'}</Text>
         <Text style={styles.name} numberOfLines={1}>{person.name}</Text>
 
-        <View style={[styles.balance, { backgroundColor: owes ? CORAL : color.green }]}>
-          <Text style={styles.balanceLabel}>{owes ? (isCustomer ? 'Remaining balance' : 'Amount we still owe') : 'Fully paid'}</Text>
-          <Text style={styles.balanceValue}>{owes ? peso(person.balance) : '✓ ' + peso(0)}</Text>
-        </View>
-
-        <View style={styles.totals}>
-          <View style={styles.totalBox}>
-            <Text style={styles.totalLabel}>{isCustomer ? 'Total utang' : 'Total credit'}</Text>
-            <Text style={styles.totalValue}>{peso(person.charged)}</Text>
+        {showBalance ? (
+          <View style={[styles.balance, { backgroundColor: owes ? CORAL : color.green }]}>
+            <Text style={styles.balanceLabel}>{owes ? (isCustomer ? 'Remaining balance' : 'Amount we still owe') : 'Fully paid'}</Text>
+            <Text style={styles.balanceValue}>{owes ? peso(person.balance) : '✓ ' + peso(0)}</Text>
           </View>
-          <View style={[styles.totalBox, { backgroundColor: '#DCEAE2' }]}>
-            <Text style={styles.totalLabel}>Total paid</Text>
-            <Text style={[styles.totalValue, { color: color.green }]}>{peso(person.paid)}</Text>
+        ) : (
+          <View style={[styles.balance, { backgroundColor: added > 0 || paid === 0 ? CORAL : color.green }]}>
+            <Text style={styles.balanceLabel}>{added > 0 || paid === 0 ? `Total for ${dayLabel}` : `Paid on ${dayLabel}`}</Text>
+            <Text style={styles.balanceValue}>{peso(added > 0 || paid === 0 ? added : paid)}</Text>
           </View>
-        </View>
+        )}
 
-        <Text style={styles.recentTitle}>{ledger.length > ROWS ? `Last ${ROWS} entries` : 'Entries'}</Text>
-        {recent.map((e) => {
+        {oneDay ? (
+          // The day's own figures; whichever one already fills the big box above is left out.
+          (showBalance || (added > 0 && paid > 0)) ? (
+            <View style={styles.totals}>
+              {showBalance ? (
+                <View style={styles.totalBox}>
+                  <Text style={styles.totalLabel}>Total for {dayLabel}</Text>
+                  <Text style={styles.totalValue}>{peso(added)}</Text>
+                </View>
+              ) : null}
+              {paid > 0 ? (
+                <View style={[styles.totalBox, { backgroundColor: '#DCEAE2' }]}>
+                  <Text style={styles.totalLabel}>Paid on {dayLabel}</Text>
+                  <Text style={[styles.totalValue, { color: color.green }]}>{peso(paid)}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null
+        ) : (
+          <View style={styles.totals}>
+            <View style={styles.totalBox}>
+              <Text style={styles.totalLabel}>{isCustomer ? 'Total utang' : 'Total credit'}</Text>
+              <Text style={styles.totalValue}>{peso(person.charged)}</Text>
+            </View>
+            <View style={[styles.totalBox, { backgroundColor: '#DCEAE2' }]}>
+              <Text style={styles.totalLabel}>Total paid</Text>
+              <Text style={[styles.totalValue, { color: color.green }]}>{peso(person.paid)}</Text>
+            </View>
+          </View>
+        )}
+
+        <Text style={styles.recentTitle}>
+          {oneDay ? `Entries on ${dayLabel}` : ledger.length > ROWS ? `Last ${ROWS} entries` : 'Entries'}
+        </Text>
+        {oneDay && shown.length === 0 ? <Text style={styles.rowDate}>Nothing recorded on this day.</Text> : null}
+        {shown.map((e) => {
           const pay = e.kind === 'payment';
           const s = settled.get(entryKey(e.kind, e.id));
           const what =
@@ -127,15 +194,19 @@ function StatementCard({ person, ledger, stall }: { person: PersonSummary; ledge
         })}
 
         <View style={styles.thanks}>
-          <Text style={styles.thanksText}>{owes && isCustomer ? 'Salamat po sa pagbili! Pakibayaran po kapag kaya na. 🐟' : 'Salamat po! 🐟'}</Text>
+          <Text style={styles.thanksText}>{showBalance && owes && isCustomer ? 'Salamat po sa pagbili! Pakibayaran po kapag kaya na. 🐟' : 'Salamat po! 🐟'}</Text>
         </View>
       </View>
     </>
   );
 }
 
-function statementText(p: PersonSummary, ledger: LedgerEntry[], stall: string) {
-  const lines = ledger.slice(-12).map((e) =>
+function statementText(p: PersonSummary, ledger: LedgerEntry[], stall: string, scope: Scope, day?: string) {
+  const oneDay = scope !== 'all' && !!day;
+  const entries = oneDay ? ledger.filter((e) => e.date === day) : ledger.slice(-12);
+  const { added, paid } = dayTotals(oneDay ? entries : []);
+  const balance = p.balance > 0 ? `Remaining balance: ${peso(p.balance)}` : 'Fully paid. Salamat!';
+  const lines = entries.map((e) =>
     e.kind === 'payment'
       ? `${short(e.date)}  Paid  −${peso(e.total)}`
       : e.kind === 'balance'
@@ -144,11 +215,12 @@ function statementText(p: PersonSummary, ledger: LedgerEntry[], stall: string) {
   );
   return [
     stall,
-    `Statement for ${p.name} — ${short(today())}`,
+    `Statement for ${p.name} — ${short(oneDay ? day! : today())}`,
     '',
-    ...lines,
+    ...(lines.length ? lines : ['Nothing recorded on this day.']),
     '',
-    p.balance > 0 ? `Remaining balance: ${peso(p.balance)}` : 'Fully paid. Salamat!',
+    ...(oneDay ? [`Total for ${short(day!)}: ${peso(added)}`, ...(paid > 0 ? [`Paid on ${short(day!)}: ${peso(paid)}`] : [])] : []),
+    ...(scope !== 'day' ? [balance] : []),
   ].join('\n');
 }
 

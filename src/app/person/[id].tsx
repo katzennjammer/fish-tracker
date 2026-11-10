@@ -102,7 +102,11 @@ export default function PersonScreen() {
       ) : null}
       <View style={styles.tools}>
         <Tool icon="plus" label="Old balance" onPress={() => router.push({ pathname: '/balance', params: { personId: String(person.id) } })} />
-        <Tool icon="share" label="Send balance" onPress={() => router.push({ pathname: '/statement', params: { id: String(person.id) } })} />
+        <Tool
+          icon="share"
+          label={day ? 'Send this day' : 'Send balance'}
+          onPress={() => router.push({ pathname: '/statement', params: day ? { id: String(person.id), day } : { id: String(person.id) } })}
+        />
         {person.phone ? <Tool icon="phone" label="Call" onPress={() => Linking.openURL(`tel:${person.phone}`)} /> : null}
       </View>
 
