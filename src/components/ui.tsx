@@ -273,7 +273,14 @@ export function Segmented<V extends string>({
         const on = o.value === value;
         return (
           <Pressable key={o.value} onPress={() => onChange(o.value)} style={[styles.segmentItem, on && styles.segmentOn]}>
-            <Text style={[styles.segmentText, on && { color: color.ink, fontFamily: font.semibold }]}>{o.label}</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              style={[styles.segmentText, on && { color: color.ink, fontFamily: font.semibold }]}
+            >
+              {o.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -433,7 +440,7 @@ const styles = StyleSheet.create({
   inputBig: { fontFamily: font.display, fontSize: 34, paddingVertical: 4 },
   affix: { fontFamily: font.display, fontSize: 20, color: color.inkSoft },
   segment: { flexDirection: 'row', backgroundColor: color.sunk, borderRadius: 12, padding: 3 },
-  segmentItem: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 9 },
+  segmentItem: { flex: 1, paddingVertical: 9, paddingHorizontal: 4, alignItems: 'center', borderRadius: 9 },
   segmentOn: {
     backgroundColor: color.card,
     borderWidth: StyleSheet.hairlineWidth,

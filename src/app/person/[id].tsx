@@ -33,6 +33,8 @@ export default function PersonScreen() {
   const allRows = withRunningBalance(ledger);
   const rows = day ? allRows.filter((r) => r.e.date === day) : allRows;
   const settled = settle(ledger);
+  // An empty day has nothing to send, so the button goes back to the whole balance.
+  const sendDay = day && rows.length > 0 ? day : null;
 
   const openSince = openSinceDate(ledger);
   const quiet = person.balance > 0 ? daysBetween(person.last_payment ?? openSince ?? today(), today()) : 0;
@@ -104,8 +106,8 @@ export default function PersonScreen() {
         <Tool icon="plus" label="Old balance" onPress={() => router.push({ pathname: '/balance', params: { personId: String(person.id) } })} />
         <Tool
           icon="share"
-          label={day ? 'Send this day' : 'Send balance'}
-          onPress={() => router.push({ pathname: '/statement', params: day ? { id: String(person.id), day } : { id: String(person.id) } })}
+          label={sendDay ? 'Send this day' : 'Send balance'}
+          onPress={() => router.push({ pathname: '/statement', params: sendDay ? { id: String(person.id), day: sendDay } : { id: String(person.id) } })}
         />
         {person.phone ? <Tool icon="phone" label="Call" onPress={() => Linking.openURL(`tel:${person.phone}`)} /> : null}
       </View>
